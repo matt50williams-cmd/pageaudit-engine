@@ -1,0 +1,23 @@
+{
+  "name": "pageaudit-engine",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "better-sqlite3": "^12.8.0",
+    "dotenv": "^17.3.1",
+    "fastify": "^5.8.2",
+    "nodemailer": "^8.0.3",
+    "openai": "^4.28.0",
+    "puppeteer": "^24.40.0",
+    "stripe": "^20.4.1"
+  }
+}
