@@ -1,4 +1,19 @@
-const prompt = `
+const OpenAI = require("openai");
+
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+async function analyzeOrder(order) {
+  const {
+    name,
+    page_url,
+    goal,
+    struggles,
+    review_type,
+  } = order;
+
+  const prompt = `
 You are a high-level social media growth strategist.
 
 This is NOT a generic audit.
@@ -20,7 +35,7 @@ Goal: ${goal}
 Struggles: ${struggles}
 Review Type: ${review_type}
 
-OUTPUT FORMAT (DO NOT CHANGE):
+OUTPUT FORMAT:
 
 1. PERSONALIZED OVERVIEW
 - Speak directly to ${name}
@@ -29,17 +44,16 @@ OUTPUT FORMAT (DO NOT CHANGE):
 
 2. VISIBILITY ANALYSIS
 - Explain how their visibility may be limiting growth
-- Tie it to real-world reach (NOT theory)
+- Tie it to real-world reach
 
 3. TOP 3 GROWTH BLOCKERS
 - Be specific
 - No generic phrases
-- Each blocker must feel real and observable
 
 4. WHAT’S WORKING
 - Even if limited, find positives
 
-5. 7-DAY ACTION PLAN (VERY IMPORTANT)
+5. 7-DAY ACTION PLAN
 Day 1:
 Day 2:
 Day 3:
@@ -48,15 +62,9 @@ Day 5:
 Day 6:
 Day 7:
 
-Each day must:
-- Be actionable
-- Be simple
-- Be tied to their goal
-
-6. POSTING EXAMPLES (CRITICAL)
+6. POSTING EXAMPLES
 Give 3 SPECIFIC post ideas they can copy:
 
-Example format:
 Post Idea 1:
 Hook:
 What to say:
@@ -69,6 +77,21 @@ TONE:
 - Confident
 - Direct
 - No fluff
-- No generic advice
 - Must feel like a paid consultant wrote it
 `;
+
+  const response = await client.chat.completions.create({
+    model: "gpt-4.1-mini",
+    messages: [
+      {
+        role: "user",
+        content: prompt,
+      },
+    ],
+    temperature: 0.8,
+  });
+
+  return response.choices[0].message.content;
+}
+
+module.exports = { analyzeOrder };
