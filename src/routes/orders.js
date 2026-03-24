@@ -1,5 +1,5 @@
 const { runAnalyzer } = require("../services/analyzer");
-const { runWriter } = require("../services/writer");
+const { runWriter } = require("../services/reportWriter");
 
 async function routes(fastify, options) {
   fastify.post("/orders", async (request, reply) => {
