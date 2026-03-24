@@ -1,88 +1,136 @@
-const { getClient } = require('./openai');
+const OpenAI = require("openai");
 
-async function writeCustomerReport(pageData, analysis, reviewType, goal) {
-  const client = getClient();
-  const overallScore100 = Math.round((analysis.overall_score || 0) * 10);
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-  const prompt = `
-You are writing a professional Facebook page growth report for a paying customer.
+function buildWriterPrompt(order, analysis) {
+  const name = order.name || "User";
+  const pageUrl = order.page_url || order.pageUrl || order.facebook_url || "";
+  const goal = order.goal || order.goals || "";
+  const reviewType = order.review_type || order.reviewType || "";
 
-Tone: friendly, direct, professional, honest. No emojis. No fluff.
+  return `
+You are a premium Facebook growth strategist.
+
+Your job is to turn structured analysis JSON into a high-value written audit report.
 
 IMPORTANT RULES:
-- Use clear section headers exactly as written
-- Do not skip any sections
-- Keep formatting consistent and easy to read
-- Do not repeat ideas across sections
-- Keep sentences concise and actionable
-- Each action step must be clear and immediately usable
-- Keep total report length between 600 and 900 words
-- If data is incomplete, still provide a useful and professional report
+1. You must ONLY use the facts in the analysis JSON.
+2. Never invent follower counts, engagement metrics, or page performance numbers.
+3. If a metric is null, do not mention it.
+4. If audit_mode = "strategy", write a strategy-based audit and do not mention missing data repeatedly.
+5. If audit_mode = "data", you may reference verified metrics from analysis.verified_metrics.
+6. Do not use generic filler like:
+   - "your page shows potential"
+   - "post more consistently"
+   - "focus on engagement"
+7. Be specific, direct, and useful.
+8. Make it feel like a paid consultant wrote it.
 
-The customer paid for a ${reviewType} page review. Their goal: ${goal || 'grow their page'}.
+USER CONTEXT:
+- Name: ${name}
+- Page URL: ${pageUrl}
+- Goal: ${goal}
+- Account Type: ${reviewType}
 
-Page facts:
-- Page name: ${pageData.page_name}
-- Followers: ${pageData.followers}
-- Posts analyzed: ${pageData.posting_summary.posts_analyzed}
-- Average days between posts: ${pageData.posting_summary.average_days_between_posts}
-- Category: ${pageData.category}
-- Scrape success: ${pageData.scrape_success}
-
-Analysis results:
+ANALYSIS JSON:
 ${JSON.stringify(analysis, null, 2)}
 
-Write a full report with these sections:
+WRITE THE REPORT IN THIS EXACT STRUCTURE:
 
-1. PAGE OVERVIEW
-Talk about their page specifically. Mention follower count, posting consistency, and activity.
+1. Personalized Overview
+- 1 strong paragraph
+- speak directly to ${name}
+- mention the goal
+- if audit_mode = data, reference only verified metrics
+- if audit_mode = strategy, focus on strategy and growth direction
 
-2. OVERALL SCORE: ${overallScore100}/100
-Explain the score in plain English.
+2. What We Analyzed
+- short section
+- explain what was reviewed using the analysis JSON
+- no bullets required, but make it readable
 
-3. WHAT YOU ARE DOING WELL
-Explain each strength clearly.
+3. Visibility / Positioning Analysis
+- explain how the page is or is not positioned for growth
 
-4. WHAT IS HOLDING YOU BACK
-Explain each weakness directly and honestly.
+4. Content & Consistency Analysis
+- explain how posting habits/content approach affect growth
 
-5. WHAT FACEBOOK ACTUALLY REWARDS RIGHT NOW
-Explain the algorithm in plain English.
+5. Top 3 Growth Blockers
+- exactly 3 numbered items
+- based only on analysis.core_problems
 
-6. YOUR CONTENT STRATEGY
-Specific advice on content types, frequency, hooks, and post structure.
+6. Top 3 Strengths
+- exactly 3 numbered items
+- based only on analysis.strengths
 
-7. ENGAGEMENT STRATEGY
-How to increase comments, shares, and saves with specific examples.
+7. Immediate Growth Moves
+- exactly 5 numbered actions
+- practical, high-impact, specific
 
-8. YOUR GROWTH POTENTIAL
-What they can expect in 30 and 90 days.
+8. Your 7-Day Action Plan
+Use this exact format:
+Day 1:
+Day 2:
+Day 3:
+Day 4:
+Day 5:
+Day 6:
+Day 7:
 
-9. YOUR 7-DAY ACTION PLAN
-Day-by-day plan with specific actions.
+9. 3 Content Ideas
+Use this exact format:
+Content Idea 1:
+Hook:
+What to post:
+CTA:
 
-End with exactly this:
+Content Idea 2:
+Hook:
+What to post:
+CTA:
 
----
-WANT TO KEEP GROWING AFTER YOUR 7 DAYS?
+Content Idea 3:
+Hook:
+What to post:
+CTA:
 
-Get a fresh audit every 30 days with updated strategy, progress tracking, and a full 30-day content plan.
+10. 30-Day Strategy Summary
+- 1 strong paragraph
+- clear growth direction
+- no fluff
 
-Start your Growth Plan here:
-https://buy.stripe.com/bJefZiaZydoL0qxdZlasg06
----
+STYLE:
+- premium
+- strategic
+- direct
+- clear
+- believable
+- no fake certainty
 `;
-
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o',
-    temperature: 0.6,
-    messages: [
-      { role: 'system', content: 'You write premium agency-style Facebook page audit reports.' },
-      { role: 'user', content: prompt }
-    ]
-  });
-
-  return response.choices[0].message.content;
 }
 
-module.exports = { writeCustomerReport };
+async function runWriter(order, analysis) {
+  const prompt = buildWriterPrompt(order, analysis);
+
+  const response = await client.chat.completions.create({
+    model: "gpt-4.1-mini",
+    messages: [
+      {
+        role: "user",
+        content: prompt,
+      },
+    ],
+    temperature: 0.6,
+  });
+
+  const reportText =
+    response.choices?.[0]?.message?.content || "Report could not be generated.";
+
+  return {
+    reportText,
+  };
+}
+
+module.exports = { runWriter };
