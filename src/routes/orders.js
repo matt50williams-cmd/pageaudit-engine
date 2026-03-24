@@ -1,7 +1,7 @@
 const { runAnalyzer } = require("../services/analyzer");
 const { runWriter } = require("../services/reportWriter");
 
-async function routes(fastify, options) {
+async function routes(fastify) {
   fastify.post("/orders", async (request, reply) => {
     try {
       const order = request.body || {};
@@ -21,7 +21,7 @@ async function routes(fastify, options) {
         scraper_insights: analyzerResult.scraperInsights,
       });
     } catch (error) {
-      fastify.log.error(error);
+      request.log.error(error);
 
       return reply.status(500).send({
         success: false,

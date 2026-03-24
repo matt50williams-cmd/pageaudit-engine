@@ -1,67 +1,141 @@
-const fetch = require("node-fetch");
+const axios = require("axios");
 
-async function runScraper(pageUrl) {
-  if (!pageUrl) {
-    return {
-      ok: false,
-      error: "Missing page URL",
-      data: null,
-    };
-  }
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  if (!process.env.BRIGHTDATA_API_KEY) {
-    return {
-      ok: false,
-      error: "Missing BRIGHTDATA_API_KEY",
-      data: null,
-    };
-  }
-
-  try {
-    const response = await fetch("https://api.brightdata.com/request", {
-      method: "POST",
+async function fetchSnapshot(snapshotId) {
+  const response = await axios.get(
+    `https://api.brightdata.com/datasets/v3/snapshot/${snapshotId}`,
+    {
       headers: {
         Authorization: `Bearer ${process.env.BRIGHTDATA_API_KEY}`,
-        "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        url: pageUrl,
-        zone: "web_unlocker",
+      params: {
         format: "json",
-      }),
-    });
+      },
+    }
+  );
 
-    const rawText = await response.text();
+  return response.data;
+}
 
-    if (!response.ok) {
+async function runScraper(pageUrl) {
+  try {
+    if (!pageUrl) {
       return {
         ok: false,
-        error: `Bright Data HTTP ${response.status}: ${rawText.slice(0, 300)}`,
-        data: null,
+        error: "Missing page URL",
       };
     }
 
-    let parsed;
-    try {
-      parsed = JSON.parse(rawText);
-    } catch (jsonError) {
+    if (!process.env.BRIGHTDATA_API_KEY) {
       return {
         ok: false,
-        error: `Bright Data returned non-JSON response: ${rawText.slice(0, 300)}`,
-        data: null,
+        error: "Missing BRIGHTDATA_API_KEY environment variable",
       };
     }
 
-    return {
-      ok: true,
-      error: null,
-      data: Array.isArray(parsed) ? parsed : [parsed],
-    };
-  } catch (error) {
+    if (!process.env.BRIGHTDATA_DATASET_ID) {
+      return {
+        ok: false,
+        error: "Missing BRIGHTDATA_DATASET_ID environment variable",
+      };
+    }
+
+    // 1) Trigger dataset run
+    const triggerResponse = await axios.post(
+      "https://api.brightdata.com/datasets/v3/trigger",
+      {
+        dataset_id: process.env.BRIGHTDATA_DATASET_ID,
+        input: [
+          {
+            url: pageUrl,
+          },
+        ],
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.BRIGHTDATA_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const snapshotId =
+      triggerResponse.data?.snapshot_id ||
+      triggerResponse.data?.snapshotId ||
+      null;
+
+    if (!snapshotId) {
+      return {
+        ok: false,
+        error: "Bright Data trigger succeeded but no snapshot_id was returned",
+        raw: triggerResponse.data,
+      };
+    }
+
+    // 2) Poll for results
+    const maxAttempts = 12;
+    const delayMs = 5000;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const results = await fetchSnapshot(snapshotId);
+
+        if (Array.isArray(results) && results.length > 0) {
+          return {
+            ok: true,
+            data: results,
+            snapshotId,
+          };
+        }
+
+        // Sometimes snapshot endpoint returns object wrapper
+        if (
+          results &&
+          typeof results === "object" &&
+          Array.isArray(results.data) &&
+          results.data.length > 0
+        ) {
+          return {
+            ok: true,
+            data: results.data,
+            snapshotId,
+          };
+        }
+      } catch (pollError) {
+        const status = pollError.response?.status;
+
+        // 202/404/400 can happen while snapshot is still cooking
+        if (status && [202, 400, 404].includes(status)) {
+          // keep polling
+        } else {
+          console.error(
+            "SCRAPER POLL ERROR:",
+            pollError.response?.data || pollError.message
+          );
+        }
+      }
+
+      await sleep(delayMs);
+    }
+
     return {
       ok: false,
-      error: error.message || "Unknown scraper error",
-      data: null,
+      error: "Bright Data snapshot did not return results in time",
+      snapshotId,
+    };
+  } catch (error) {
+    console.error("SCRAPER ERROR:", error.response?.data || error.message);
+
+    return {
+      ok: false,
+      error:
+        error.response?.data?.message ||
+        error.response?.data?.error ||
+        error.message ||
+        "Unknown scraper error",
     };
   }
 }

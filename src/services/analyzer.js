@@ -5,55 +5,6 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-function extractInsights(scrapedData) {
-  if (!scrapedData || !Array.isArray(scrapedData) || scrapedData.length === 0) {
-    return null;
-  }
-
-  const posts = scrapedData.slice(0, 10);
-  const first = posts[0] || {};
-
-  const totalLikes = posts.reduce((sum, p) => sum + (p.likes || 0), 0);
-  const totalComments = posts.reduce((sum, p) => sum + (p.num_comments || 0), 0);
-  const totalShares = posts.reduce((sum, p) => sum + (p.num_shares || 0), 0);
-  const totalViews = posts.reduce(
-    (sum, p) => sum + (p.video_view_count || p.play_count || 0),
-    0
-  );
-
-  const avgLikes = posts.length ? Math.round(totalLikes / posts.length) : null;
-  const avgComments = posts.length ? Math.round(totalComments / posts.length) : null;
-  const avgShares = posts.length ? Math.round(totalShares / posts.length) : null;
-  const avgViews = posts.length ? Math.round(totalViews / posts.length) : null;
-
-  let engagementLevel = null;
-  if (avgLikes !== null && avgComments !== null) {
-    if (avgLikes > 200 || avgComments > 30) engagementLevel = "high";
-    else if (avgLikes > 50 || avgComments > 10) engagementLevel = "medium";
-    else engagementLevel = "low";
-  }
-
-  return {
-    pageName: first.page_name || first.user_username_raw || null,
-    followers: first.page_followers ?? null,
-    category: first.page_category || null,
-    intro: first.page_intro || null,
-    website: first.page_external_website || null,
-    verified:
-      typeof first.page_is_verified === "boolean" ? first.page_is_verified : null,
-    postCountAnalyzed: posts.length || 0,
-    avgLikes,
-    avgComments,
-    avgShares,
-    avgViews,
-    engagementLevel,
-    samplePostText: posts
-      .map((p) => p.content)
-      .filter(Boolean)
-      .slice(0, 3),
-  };
-}
-
 function normalizeOrder(order) {
   return {
     name: order.name || null,
@@ -67,19 +18,138 @@ function normalizeOrder(order) {
   };
 }
 
+function pickFirst(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return null;
+}
+
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  const cleaned = String(value).replace(/[^0-9.-]/g, "");
+  if (!cleaned) return null;
+
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : null;
+}
+
+function extractPostsFromBrightData(scrapedData) {
+  if (!scrapedData) return [];
+
+  if (Array.isArray(scrapedData)) return scrapedData;
+  if (Array.isArray(scrapedData.data)) return scrapedData.data;
+  if (Array.isArray(scrapedData.results)) return scrapedData.results;
+  if (Array.isArray(scrapedData.items)) return scrapedData.items;
+  if (Array.isArray(scrapedData.posts)) return scrapedData.posts;
+
+  return [];
+}
+
+function extractInsights(scrapedData) {
+  const posts = extractPostsFromBrightData(scrapedData).slice(0, 10);
+
+  if (!posts.length) {
+    return null;
+  }
+
+  const first = posts[0] || {};
+
+  const totalLikes = posts.reduce(
+    (sum, p) => sum + (numberOrNull(p.likes) || 0),
+    0
+  );
+
+  const totalComments = posts.reduce(
+    (sum, p) => sum + (numberOrNull(p.num_comments || p.comments) || 0),
+    0
+  );
+
+  const totalShares = posts.reduce(
+    (sum, p) => sum + (numberOrNull(p.num_shares || p.shares) || 0),
+    0
+  );
+
+  const totalViews = posts.reduce(
+    (sum, p) =>
+      sum +
+      (numberOrNull(
+        pickFirst(
+          p.video_view_count,
+          p.play_count,
+          p.video_views,
+          p.views
+        )
+      ) || 0),
+    0
+  );
+
+  const avgLikes = posts.length ? Math.round(totalLikes / posts.length) : null;
+  const avgComments = posts.length ? Math.round(totalComments / posts.length) : null;
+  const avgShares = posts.length ? Math.round(totalShares / posts.length) : null;
+  const avgViews = totalViews > 0 ? Math.round(totalViews / posts.length) : null;
+
+  let engagementLevel = null;
+  if (avgLikes !== null || avgComments !== null || avgShares !== null) {
+    const score = (avgLikes || 0) + (avgComments || 0) * 3 + (avgShares || 0) * 4;
+
+    if (score >= 300) engagementLevel = "high";
+    else if (score >= 75) engagementLevel = "medium";
+    else engagementLevel = "low";
+  }
+
+  return {
+    pageName: pickFirst(
+      first.page_name,
+      first.user_username_raw,
+      first.user_name,
+      first.page_title,
+      first.author_name
+    ),
+    followers: numberOrNull(
+      pickFirst(
+        first.page_followers,
+        first.followers,
+        first.page_followers_count,
+        first.followers_count
+      )
+    ),
+    category: pickFirst(first.page_category, first.category),
+    intro: pickFirst(first.page_intro, first.about, first.bio),
+    website: pickFirst(first.page_external_website, first.website),
+    verified:
+      typeof first.page_is_verified === "boolean"
+        ? first.page_is_verified
+        : typeof first.is_verified === "boolean"
+        ? first.is_verified
+        : null,
+    postCountAnalyzed: posts.length,
+    avgLikes,
+    avgComments,
+    avgShares,
+    avgViews,
+    engagementLevel,
+    samplePostText: posts
+      .map((p) => pickFirst(p.content, p.text, p.post_text, p.caption))
+      .filter(Boolean)
+      .slice(0, 3),
+  };
+}
+
 function buildAnalyzerPrompt(order, insights, scraperStatus, scraperError) {
   return `
-You are a Facebook page audit analyzer.
+You are a Facebook business page audit analyzer.
 
-Your job is to output ONLY valid JSON.
-Do not write a report.
-Do not use markdown.
-Do not use code fences.
-Do not invent data.
-If data is unavailable, use null instead of guessing.
+Return ONLY valid JSON.
+No markdown.
+No code fences.
+No explanation outside JSON.
+Do not invent metrics.
+If unknown, use null.
 
-Return this exact JSON shape:
-
+Return this exact shape:
 {
   "audit_mode": "data" or "strategy",
   "page_type": "business" or "personal" or null,
@@ -105,29 +175,20 @@ Return this exact JSON shape:
   "confidence_notes": [string, string]
 }
 
-RULES:
+Rules:
 1. If scraperStatus is not "success", audit_mode must be "strategy".
-2. If followers or engagement metrics are not verified, keep them null.
-3. Never say 0 unless the metric was actually verified as 0.
-4. Focus on known facts from:
-   - intake data
-   - verified scraped insights
-5. Keep each list item short and specific.
-6. If page looks like a business page, set page_type to "business". If unclear, null.
+2. Use verified_metrics only from SCRAPED INSIGHTS.
+3. Never put 0 unless it is verified.
+4. Focus on business page growth.
+5. If page type is unclear, use null.
+6. Keep items short and specific.
 7. Output JSON only.
 
 INTAKE DATA:
 ${JSON.stringify(order, null, 2)}
 
 SCRAPER STATUS:
-${JSON.stringify(
-  {
-    scraperStatus,
-    scraperError,
-  },
-  null,
-  2
-)}
+${JSON.stringify({ scraperStatus, scraperError }, null, 2)}
 
 SCRAPED INSIGHTS:
 ${JSON.stringify(insights, null, 2)}
@@ -142,19 +203,31 @@ async function runAnalyzer(order) {
   let scraperStatus = "not_attempted";
   let scraperError = null;
 
-  if (pageUrl) {
+  if (!pageUrl) {
+    scraperStatus = "failed";
+    scraperError = "Missing page URL";
+  } else {
     const scraperResult = await runScraper(pageUrl);
 
-    if (scraperResult.ok) {
+    if (scraperResult?.ok) {
       scrapedData = scraperResult.data;
       scraperStatus = "success";
     } else {
       scraperStatus = "failed";
-      scraperError = scraperResult.error || "Unknown scraper failure";
+      scraperError = scraperResult?.error || "Unknown scraper failure";
     }
   }
 
   const insights = extractInsights(scrapedData);
+
+  console.log("SCRAPER STATUS:", scraperStatus);
+  console.log("SCRAPER ERROR:", scraperError);
+  console.log(
+    "SCRAPER RAW SAMPLE:",
+    JSON.stringify(scrapedData || null).slice(0, 1200)
+  );
+  console.log("SCRAPER INSIGHTS:", JSON.stringify(insights, null, 2));
+
   const prompt = buildAnalyzerPrompt(
     normalizedOrder,
     insights,
@@ -164,12 +237,7 @@ async function runAnalyzer(order) {
 
   const response = await client.chat.completions.create({
     model: "gpt-4.1-mini",
-    messages: [
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
+    messages: [{ role: "user", content: prompt }],
     temperature: 0.2,
     response_format: { type: "json_object" },
   });
@@ -198,11 +266,18 @@ async function runAnalyzer(order) {
         posting_frequency: normalizedOrder.postingFrequency,
         content_type: normalizedOrder.contentType,
       },
-      core_problems: ["Analyzer parsing failed"],
+      core_problems: [
+        "Analyzer JSON parsing failed",
+        "Fallback analysis used",
+        "Scraped data may need field mapping"
+      ],
       strengths: [],
       opportunities: [],
       recommended_focus: [],
-      confidence_notes: ["AI JSON parsing failed"],
+      confidence_notes: [
+        "AI JSON parsing failed",
+        "Fallback object returned"
+      ],
     };
   }
 
