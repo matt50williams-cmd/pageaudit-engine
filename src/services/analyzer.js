@@ -294,4 +294,4 @@ async function analyzeOrder(order) {
   };
 }
 
-module.exports = { analyzeOrder };S
+module.exports = { analyzeOrder };
