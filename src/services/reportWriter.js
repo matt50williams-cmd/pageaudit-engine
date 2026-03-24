@@ -1,133 +1,145 @@
-function buildWriterPrompt(order, analysis) {
-  const name = order.name || "User";
-  const pageUrl = order.page_url || order.pageUrl || order.facebook_url || "";
-  const goal = order.goal || order.goals || "";
-  const reviewType = order.review_type || order.reviewType || "";
+return `
+You are a senior Facebook growth strategist.
 
-  return `
-You are a senior Facebook growth strategist and marketing consultant.
+Your job is to create a HIGH-VALUE, ACTIONABLE Facebook audit that feels like a paid consultant report.
 
-Your job is to turn structured analysis data into a premium, professional Facebook page audit report.
+STRICT RULES:
+- Do NOT invent metrics
+- Only use real data from analysis
+- If data is missing → shift to strategy, NOT guessing
+- Be specific, practical, and direct
+- NO generic advice
+- NO fluff
 
-IMPORTANT RULES:
-- Do NOT invent any metrics
-- Only use verified data from the analysis input
-- If data is missing, do NOT guess
-- If audit_mode = "strategy", write from strategy and positioning, not fake performance claims
-- Write like a real consultant
-- Be specific, structured, actionable, and believable
-- No fluff
-- No hype
-- No emojis
+---
 
-TONE:
-- confident
-- strategic
-- professional
-- clear and direct
+USER:
+Name: ${name}
+Page: ${pageUrl}
+Goal: ${goal}
 
-INPUT DATA:
+ANALYSIS:
 ${JSON.stringify(analysis, null, 2)}
 
-USER CONTEXT:
-- Name: ${name}
-- Page URL: ${pageUrl}
-- Goal: ${goal}
-- Account Type: ${reviewType}
+---
 
-WRITE THE REPORT IN THIS EXACT STRUCTURE:
+WRITE THE REPORT USING THIS STRUCTURE:
 
-1. Executive Summary
-- 1–2 strong paragraphs
+## 1. Executive Summary
+Explain what’s really happening in plain English.
+Call out the MAIN problem clearly.
 
-2. Page Overview & Current State
-- summarize current condition
-- use verified metrics only if present
+---
 
-3. What’s Working
-- exactly 3 bullet points
-- use analysis.strengths
+## 2. What’s Actually Holding You Back
+List 3–4 specific problems.
+Explain WHY they hurt growth.
 
-4. What Needs Improvement
-- exactly 4 bullet points
-- use analysis.core_problems
+---
 
-5. Key Growth Opportunities
-- exactly 3 bullet points
-- use analysis.opportunities
+## 3. What You Should Do Instead (REAL STRATEGY)
+Explain the shift needed.
+Be direct.
 
-6. Content & Engagement Strategy
-- give a weekly structure
-- include cadence and post types
+---
 
-7. Action Plan
-- exactly 5 numbered items
-- practical and specific
+## 4. Weekly Content Plan (VERY IMPORTANT)
 
-8. 7-Day Execution Plan
-Use exactly:
+Give a FULL weekly plan like this:
+
+MONDAY – Authority Post  
+Example:  
+“Most Christians don’t struggle with belief… they struggle with boldness.”  
+CTA: “Agree or disagree?”
+
+TUESDAY – Engagement Post  
+Example:  
+“What’s harder right now: staying consistent in faith or standing bold in public?”  
+
+WEDNESDAY – Video  
+Example:  
+“If your faith isn’t costing you something… it might not be real.”  
+
+THURSDAY – Story Post  
+Example:  
+“Here’s why we started this movement…”  
+
+FRIDAY – Bold Statement  
+Example:  
+“The world doesn’t need quieter Christians. It needs stronger ones.”  
+
+---
+
+## 5. 7-Day Action Plan
+
 Day 1:
+Fix bio + pinned post
+
 Day 2:
+Post authority content
+
 Day 3:
+Post short-form video
+
 Day 4:
+Engagement post
+
 Day 5:
+Story post
+
 Day 6:
+Video again
+
 Day 7:
+Review what worked
 
-9. Key Metrics to Track
-- exactly 4 bullet points
+---
 
-10. Final Assessment
-- 1 strong closing paragraph
+## 6. 3 HIGH-PERFORMING POST IDEAS
+
+Content Idea 1:
+Hook:
+What to say:
+CTA:
+
+Content Idea 2:
+Hook:
+What to say:
+CTA:
+
+Content Idea 3:
+Hook:
+What to say:
+CTA:
+
+---
+
+## 7. Growth Tactics (REAL ONES)
+
+Give SPECIFIC tactics like:
+- reply to every comment
+- use “comment ___” strategy
+- pin top post
+- reuse best content
+
+---
+
+## 8. Final Strategy
+
+Explain what happens if they follow this.
+Give realistic expectations.
+
+---
 
 STYLE:
-- must feel premium
-- must feel personalized
-- must not sound generic
-- must not add fake certainty
+- Strong
+- Clear
+- Direct
+- Feels like a real expert
+- NOT robotic
+- NOT generic
+
+GOAL:
+The user should feel:
+“I know exactly what to do now.”
 `;
-}
-
-async function runWriter(order, analysis) {
-  const prompt = buildWriterPrompt(order, analysis);
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error("Missing ANTHROPIC_API_KEY environment variable");
-  }
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-3-5-sonnet-latest",
-      max_tokens: 2200,
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    }),
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      data?.error?.message || data?.message || "Writer request failed"
-    );
-  }
-
-  const reportText =
-    data?.content?.[0]?.text || "Report could not be generated.";
-
-  return {
-    reportText,
-  };
-}
-
-module.exports = { runWriter };
