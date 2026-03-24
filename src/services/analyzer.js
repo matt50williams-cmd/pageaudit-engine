@@ -1,57 +1,74 @@
-const { getClient } = require('./openai');
+const prompt = `
+You are a high-level social media growth strategist.
 
-async function analyzePage(data) {
-  const client = getClient();
+This is NOT a generic audit.
+This must feel like a PREMIUM, personalized report based on the user's actual profile and goals.
 
-  const {
-    name,
-    pageUrl,
-    reviewType,
-    goals,
-    postingFrequency,
-    contentType,
-    struggles,
-    extraNotes
-  } = data || {};
+STRICT RULES:
+- Use the user's NAME at least 2 times
+- Reference their GOAL directly
+- Reference their STRUGGLE directly
+- Mention their PROFILE URL explicitly
+- DO NOT speak generally
+- DO NOT give generic advice
+- Every recommendation must feel specific and tactical
 
-  const prompt = `
-You are a Facebook growth strategist.
+USER DATA:
+Name: ${name}
+Profile URL: ${page_url}
+Goal: ${goal}
+Struggles: ${struggles}
+Review Type: ${review_type}
 
-Analyze this profile and give specific, actionable advice.
+OUTPUT FORMAT (DO NOT CHANGE):
 
-User Info:
-Name: ${name || ''}
-Profile: ${pageUrl || ''}
-Type: ${reviewType || ''}
-Goal: ${goals || ''}
-Posting: ${postingFrequency || ''}
-Content: ${contentType || ''}
-Struggles: ${struggles || ''}
-Notes: ${extraNotes || ''}
+1. PERSONALIZED OVERVIEW
+- Speak directly to ${name}
+- Mention their goal and struggle
+- Explain what is likely happening on their page
 
-Return JSON:
+2. VISIBILITY ANALYSIS
+- Explain how their visibility may be limiting growth
+- Tie it to real-world reach (NOT theory)
 
-{
-  "overallScore": 0,
-  "scoreReason": "",
-  "strengths": [],
-  "weaknesses": [],
-  "priorityFixes": [],
-  "nextSteps": []
-}
+3. TOP 3 GROWTH BLOCKERS
+- Be specific
+- No generic phrases
+- Each blocker must feel real and observable
+
+4. WHAT’S WORKING
+- Even if limited, find positives
+
+5. 7-DAY ACTION PLAN (VERY IMPORTANT)
+Day 1:
+Day 2:
+Day 3:
+Day 4:
+Day 5:
+Day 6:
+Day 7:
+
+Each day must:
+- Be actionable
+- Be simple
+- Be tied to their goal
+
+6. POSTING EXAMPLES (CRITICAL)
+Give 3 SPECIFIC post ideas they can copy:
+
+Example format:
+Post Idea 1:
+Hook:
+What to say:
+Call to action:
+
+7. GROWTH STRATEGY SUMMARY
+- What they should focus on over the next 30 days
+
+TONE:
+- Confident
+- Direct
+- No fluff
+- No generic advice
+- Must feel like a paid consultant wrote it
 `;
-
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o',
-    temperature: 0.7,
-    response_format: { type: 'json_object' },
-    messages: [
-      { role: 'system', content: 'Return only JSON.' },
-      { role: 'user', content: prompt }
-    ]
-  });
-
-  return JSON.parse(response.choices[0].message.content);
-}
-
-module.exports = { analyzePage };
