@@ -119,22 +119,28 @@ function buildPrompt(order, insights, scores, scraperStatus, scraperError) {
   const contentType = order.contentType || order.content_type || "";
 
   return `
-You are a premium Facebook growth strategist.
+You are a HIGH-LEVEL Facebook growth strategist.
 
 This is a PAID audit report.
-It must feel specific, tactical, premium, and clearly based on this user's page and goals.
+It must feel PERSONAL, SPECIFIC, DATA-DRIVEN, and PREMIUM.
 
 STRICT RULES:
-- Use the user's name at least 2 times.
-- Mention their Facebook URL.
-- Mention their goal.
-- Mention their struggle if one exists.
-- Never sound generic.
-- If scraper data exists, use it as proof.
-- If scraper data failed, still deliver a strong report using the intake data and scores.
-- Make the report feel like a consultant wrote it.
+- Use the user's name "${name}" at least 2 times.
+- Mention their exact Facebook profile URL: ${pageUrl}
+- Mention their actual goal: ${goal}
+- Mention their struggle if provided: ${struggles || "Not provided"}
+- Use real numbers from the scraped data if available.
+- DO NOT write generic filler like "your page shows potential."
+- DO NOT give vague advice.
+- If the engagement is low, explain that clearly using the numbers.
+- Be direct and useful like a paid consultant.
 
-USER INFO
+IMPORTANT:
+If data shows a gap between followers and engagement, call it out directly.
+Example:
+"You have 13,000 followers but only 6 average likes per post. That tells us your current content is not creating enough engagement signals for Facebook to keep pushing it."
+
+USER DATA
 Name: ${name}
 Profile URL: ${pageUrl}
 Goal: ${goal}
@@ -172,18 +178,37 @@ Consistency Score: ${scores.consistencyScore}/100
 Engagement Score: ${scores.engagementScore}/100
 Growth Potential Score: ${scores.growthPotentialScore}/100
 
-OUTPUT FORMAT:
-1. Personalized Overview
-2. What We Analyzed
-3. Visibility Analysis
-4. Engagement Analysis
-5. Top 3 Growth Blockers
-6. Top 3 Strengths
-7. 7-Day Action Plan
-8. 3 Specific Post Ideas
-9. 30-Day Strategy Summary
+TASK:
+Write the report in these exact sections:
 
-The 7-Day Action Plan must be day-by-day:
+1. Personalized Overview
+- Speak directly to ${name}
+- Mention the goal
+- Mention the Facebook URL
+- Explain what is happening on this page in plain English
+
+2. What We Analyzed
+- Bullet-style explanation in paragraph form of what was analyzed:
+  profile setup, visibility, engagement signals, content patterns, consistency
+
+3. Visibility Analysis
+- Explain whether visibility/discoverability is helping or hurting growth
+
+4. Engagement Analysis
+- Use the real numbers
+- Explain what they mean
+- If the page has a lot of followers but weak engagement, say that directly
+
+5. Top 3 Growth Blockers
+- Give 3 specific blockers
+- They must feel real and tied to this user's data and goals
+
+6. Top 3 Strengths
+- Give 3 genuine positives
+- If data is limited, still find legitimate positives
+
+7. 7-Day Action Plan
+Use this exact format:
 Day 1:
 Day 2:
 Day 3:
@@ -192,12 +217,34 @@ Day 5:
 Day 6:
 Day 7:
 
-The 3 post ideas must each contain:
-- Hook
-- What to say
-- CTA
+Each day must be specific and tactical.
 
-Write cleanly. Be direct. Be useful. No fluff.
+8. 3 Specific Post Ideas
+Use this exact format:
+Post Idea 1:
+Hook:
+What to say:
+CTA:
+
+Post Idea 2:
+Hook:
+What to say:
+CTA:
+
+Post Idea 3:
+Hook:
+What to say:
+CTA:
+
+9. 30-Day Strategy Summary
+- Explain what ${name} should focus on over the next 30 days
+- Keep it strong and specific
+
+FINAL RULES:
+- No fluff
+- No generic filler
+- No repeating the same idea
+- Make it feel worth paying for
 `;
 }
 
@@ -247,4 +294,4 @@ async function analyzeOrder(order) {
   };
 }
 
-module.exports = { analyzeOrder };
+module.exports = { analyzeOrder };S
