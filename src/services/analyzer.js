@@ -11,11 +11,15 @@ function extractInsights(scrapedData) {
   }
 
   const posts = scrapedData.slice(0, 10);
+  const first = posts[0] || {};
 
   const totalLikes = posts.reduce((sum, p) => sum + (p.likes || 0), 0);
   const totalComments = posts.reduce((sum, p) => sum + (p.num_comments || 0), 0);
   const totalShares = posts.reduce((sum, p) => sum + (p.num_shares || 0), 0);
-  const totalViews = posts.reduce((sum, p) => sum + (p.video_view_count || p.play_count || 0), 0);
+  const totalViews = posts.reduce(
+    (sum, p) => sum + (p.video_view_count || p.play_count || 0),
+    0
+  );
 
   const avgLikes = posts.length ? Math.round(totalLikes / posts.length) : 0;
   const avgComments = posts.length ? Math.round(totalComments / posts.length) : 0;
@@ -25,8 +29,6 @@ function extractInsights(scrapedData) {
   let engagementLevel = "LOW";
   if (avgLikes > 50 || avgComments > 10) engagementLevel = "MEDIUM";
   if (avgLikes > 200 || avgComments > 30) engagementLevel = "HIGH";
-
-  const first = posts[0] || {};
 
   return {
     pageName: first.page_name || first.user_username_raw || "Unknown",
@@ -49,7 +51,7 @@ function extractInsights(scrapedData) {
 }
 
 function buildScores(order, insights) {
-  const goalText = `${order.goal || ""} ${order.struggles || ""}`.toLowerCase();
+  const goalText = `${order.goal || ""} ${order.goals || ""} ${order.struggles || ""} ${order.postingFrequency || ""}`.toLowerCase();
 
   let visibilityScore = 55;
   let contentScore = 55;
@@ -75,8 +77,9 @@ function buildScores(order, insights) {
 
   if (goalText.includes("engagement")) growthPotentialScore += 5;
   if (goalText.includes("followers")) growthPotentialScore += 5;
-  if (goalText.includes("leads")) contentScore += 5;
+  if (goalText.includes("lead")) contentScore += 5;
   if (goalText.includes("inconsistent")) consistencyScore -= 15;
+  if (goalText.includes("rarely")) consistencyScore -= 15;
   if (goalText.includes("no growth")) growthPotentialScore += 10;
   if (goalText.includes("views")) visibilityScore -= 5;
 
@@ -107,37 +110,38 @@ function buildScores(order, insights) {
 }
 
 function buildPrompt(order, insights, scores, scraperStatus, scraperError) {
-  const {
-    name = "User",
-    page_url = "",
-    goal = "",
-    struggles = "",
-    review_type = "",
-  } = order;
+  const name = order.name || "User";
+  const pageUrl = order.page_url || order.pageUrl || order.facebook_url || "";
+  const goal = order.goal || order.goals || "";
+  const struggles = order.struggles || "";
+  const reviewType = order.review_type || order.reviewType || "";
+  const postingFrequency = order.postingFrequency || order.posting_frequency || "";
+  const contentType = order.contentType || order.content_type || "";
 
   return `
 You are a premium Facebook growth strategist.
 
 This is a PAID audit report.
-It must feel specific, tactical, premium, and clearly based on THIS user's page and goals.
+It must feel specific, tactical, premium, and clearly based on this user's page and goals.
 
 STRICT RULES:
 - Use the user's name at least 2 times.
 - Mention their Facebook URL.
 - Mention their goal.
-- Mention their struggle.
+- Mention their struggle if one exists.
 - Never sound generic.
-- Never say "based on limited data" unless absolutely necessary.
 - If scraper data exists, use it as proof.
 - If scraper data failed, still deliver a strong report using the intake data and scores.
 - Make the report feel like a consultant wrote it.
 
 USER INFO
 Name: ${name}
-Profile URL: ${page_url}
+Profile URL: ${pageUrl}
 Goal: ${goal}
-Struggles: ${struggles}
-Review Type: ${review_type}
+Struggles: ${struggles || "Not provided"}
+Review Type: ${reviewType}
+Posting Frequency: ${postingFrequency || "Not provided"}
+Content Type: ${contentType || "Not provided"}
 
 SCRAPER STATUS
 Status: ${scraperStatus}
@@ -198,7 +202,7 @@ Write cleanly. Be direct. Be useful. No fluff.
 }
 
 async function analyzeOrder(order) {
-  const pageUrl = order.page_url || order.facebook_url || "";
+  const pageUrl = order.page_url || order.pageUrl || order.facebook_url || "";
 
   let scrapedData = null;
   let scraperStatus = "not_attempted";
@@ -231,7 +235,8 @@ async function analyzeOrder(order) {
     temperature: 0.7,
   });
 
-  const reportText = response.choices?.[0]?.message?.content || "Report could not be generated.";
+  const reportText =
+    response.choices?.[0]?.message?.content || "Report could not be generated.";
 
   return {
     reportText,

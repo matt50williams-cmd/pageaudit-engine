@@ -9,6 +9,14 @@ async function runScraper(pageUrl) {
     };
   }
 
+  if (!process.env.BRIGHTDATA_API_KEY) {
+    return {
+      ok: false,
+      error: "Missing BRIGHTDATA_API_KEY",
+      data: null,
+    };
+  }
+
   try {
     const response = await fetch("https://api.brightdata.com/request", {
       method: "POST",
