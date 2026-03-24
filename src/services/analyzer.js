@@ -21,23 +21,27 @@ function extractInsights(scrapedData) {
     0
   );
 
-  const avgLikes = posts.length ? Math.round(totalLikes / posts.length) : 0;
-  const avgComments = posts.length ? Math.round(totalComments / posts.length) : 0;
-  const avgShares = posts.length ? Math.round(totalShares / posts.length) : 0;
-  const avgViews = posts.length ? Math.round(totalViews / posts.length) : 0;
+  const avgLikes = posts.length ? Math.round(totalLikes / posts.length) : null;
+  const avgComments = posts.length ? Math.round(totalComments / posts.length) : null;
+  const avgShares = posts.length ? Math.round(totalShares / posts.length) : null;
+  const avgViews = posts.length ? Math.round(totalViews / posts.length) : null;
 
-  let engagementLevel = "LOW";
-  if (avgLikes > 50 || avgComments > 10) engagementLevel = "MEDIUM";
-  if (avgLikes > 200 || avgComments > 30) engagementLevel = "HIGH";
+  let engagementLevel = null;
+  if (avgLikes !== null && avgComments !== null) {
+    if (avgLikes > 200 || avgComments > 30) engagementLevel = "high";
+    else if (avgLikes > 50 || avgComments > 10) engagementLevel = "medium";
+    else engagementLevel = "low";
+  }
 
   return {
-    pageName: first.page_name || first.user_username_raw || "Unknown",
-    followers: first.page_followers || 0,
-    category: first.page_category || "Unknown",
-    intro: first.page_intro || "",
-    website: first.page_external_website || "",
-    verified: Boolean(first.page_is_verified),
-    postCountAnalyzed: posts.length,
+    pageName: first.page_name || first.user_username_raw || null,
+    followers: first.page_followers ?? null,
+    category: first.page_category || null,
+    intro: first.page_intro || null,
+    website: first.page_external_website || null,
+    verified:
+      typeof first.page_is_verified === "boolean" ? first.page_is_verified : null,
+    postCountAnalyzed: posts.length || 0,
     avgLikes,
     avgComments,
     avgShares,
@@ -50,206 +54,89 @@ function extractInsights(scrapedData) {
   };
 }
 
-function buildScores(order, insights) {
-  const goalText = `${order.goal || ""} ${order.goals || ""} ${order.struggles || ""} ${order.postingFrequency || ""}`.toLowerCase();
-
-  let visibilityScore = 55;
-  let contentScore = 55;
-  let consistencyScore = 50;
-  let engagementScore = 50;
-  let growthPotentialScore = 60;
-
-  if (insights) {
-    if (insights.followers >= 1000) visibilityScore += 10;
-    if (insights.website) visibilityScore += 5;
-    if (insights.verified) visibilityScore += 5;
-
-    if (insights.avgLikes < 10) engagementScore -= 15;
-    if (insights.avgComments < 3) engagementScore -= 10;
-    if (insights.avgShares > 3) engagementScore += 10;
-
-    if (insights.samplePostText.length >= 2) contentScore += 5;
-    if (insights.avgViews > 500) contentScore += 10;
-
-    if (insights.engagementLevel === "LOW") growthPotentialScore += 10;
-    if (insights.engagementLevel === "HIGH") growthPotentialScore -= 5;
-  }
-
-  if (goalText.includes("engagement")) growthPotentialScore += 5;
-  if (goalText.includes("followers")) growthPotentialScore += 5;
-  if (goalText.includes("lead")) contentScore += 5;
-  if (goalText.includes("inconsistent")) consistencyScore -= 15;
-  if (goalText.includes("rarely")) consistencyScore -= 15;
-  if (goalText.includes("no growth")) growthPotentialScore += 10;
-  if (goalText.includes("views")) visibilityScore -= 5;
-
-  const clamp = (num) => Math.max(1, Math.min(100, Math.round(num)));
-
-  visibilityScore = clamp(visibilityScore);
-  contentScore = clamp(contentScore);
-  consistencyScore = clamp(consistencyScore);
-  engagementScore = clamp(engagementScore);
-  growthPotentialScore = clamp(growthPotentialScore);
-
-  const overallScore = clamp(
-    visibilityScore * 0.2 +
-      contentScore * 0.25 +
-      consistencyScore * 0.15 +
-      engagementScore * 0.25 +
-      growthPotentialScore * 0.15
-  );
-
+function normalizeOrder(order) {
   return {
-    visibilityScore,
-    contentScore,
-    consistencyScore,
-    engagementScore,
-    growthPotentialScore,
-    overallScore,
+    name: order.name || null,
+    email: order.email || null,
+    pageUrl: order.page_url || order.pageUrl || order.facebook_url || null,
+    goal: order.goal || order.goals || null,
+    struggles: order.struggles || null,
+    reviewType: order.review_type || order.reviewType || null,
+    postingFrequency: order.postingFrequency || order.posting_frequency || null,
+    contentType: order.contentType || order.content_type || null,
   };
 }
 
-function buildPrompt(order, insights, scores, scraperStatus, scraperError) {
-  const name = order.name || "User";
-  const pageUrl = order.page_url || order.pageUrl || order.facebook_url || "";
-  const goal = order.goal || order.goals || "";
-  const struggles = order.struggles || "";
-  const reviewType = order.review_type || order.reviewType || "";
-  const postingFrequency = order.postingFrequency || order.posting_frequency || "";
-  const contentType = order.contentType || order.content_type || "";
-
+function buildAnalyzerPrompt(order, insights, scraperStatus, scraperError) {
   return `
-You are a HIGH-LEVEL Facebook growth strategist.
+You are a Facebook page audit analyzer.
 
-This is a PAID audit report.
-It must feel PERSONAL, SPECIFIC, DATA-DRIVEN, and PREMIUM.
+Your job is to output ONLY valid JSON.
+Do not write a report.
+Do not use markdown.
+Do not use code fences.
+Do not invent data.
+If data is unavailable, use null instead of guessing.
 
-STRICT RULES:
-- Use the user's name "${name}" at least 2 times.
-- Mention their exact Facebook profile URL: ${pageUrl}
-- Mention their actual goal: ${goal}
-- Mention their struggle if provided: ${struggles || "Not provided"}
-- Use real numbers from the scraped data if available.
-- DO NOT write generic filler like "your page shows potential."
-- DO NOT give vague advice.
-- If the engagement is low, explain that clearly using the numbers.
-- Be direct and useful like a paid consultant.
+Return this exact JSON shape:
 
-IMPORTANT:
-If data shows a gap between followers and engagement, call it out directly.
-Example:
-"You have 13,000 followers but only 6 average likes per post. That tells us your current content is not creating enough engagement signals for Facebook to keep pushing it."
+{
+  "audit_mode": "data" or "strategy",
+  "page_type": "business" or "personal" or null,
+  "page_name": string or null,
+  "verified_metrics": {
+    "followers": number or null,
+    "avg_likes": number or null,
+    "avg_comments": number or null,
+    "avg_shares": number or null,
+    "avg_views": number or null,
+    "engagement_level": "high" or "medium" or "low" or null
+  },
+  "input_summary": {
+    "goal": string or null,
+    "struggles": string or null,
+    "posting_frequency": string or null,
+    "content_type": string or null
+  },
+  "core_problems": [string, string, string],
+  "strengths": [string, string, string],
+  "opportunities": [string, string, string],
+  "recommended_focus": [string, string, string],
+  "confidence_notes": [string, string]
+}
 
-USER DATA
-Name: ${name}
-Profile URL: ${pageUrl}
-Goal: ${goal}
-Struggles: ${struggles || "Not provided"}
-Review Type: ${reviewType}
-Posting Frequency: ${postingFrequency || "Not provided"}
-Content Type: ${contentType || "Not provided"}
+RULES:
+1. If scraperStatus is not "success", audit_mode must be "strategy".
+2. If followers or engagement metrics are not verified, keep them null.
+3. Never say 0 unless the metric was actually verified as 0.
+4. Focus on known facts from:
+   - intake data
+   - verified scraped insights
+5. Keep each list item short and specific.
+6. If page looks like a business page, set page_type to "business". If unclear, null.
+7. Output JSON only.
 
-SCRAPER STATUS
-Status: ${scraperStatus}
-Error: ${scraperError || "None"}
+INTAKE DATA:
+${JSON.stringify(order, null, 2)}
 
-PAGE INSIGHTS
-Page Name: ${insights?.pageName || "Unknown"}
-Followers: ${insights?.followers || 0}
-Category: ${insights?.category || "Unknown"}
-Intro: ${insights?.intro || "Unknown"}
-Website: ${insights?.website || "None"}
-Verified: ${insights?.verified ? "Yes" : "No"}
-Posts Analyzed: ${insights?.postCountAnalyzed || 0}
-Average Likes: ${insights?.avgLikes || 0}
-Average Comments: ${insights?.avgComments || 0}
-Average Shares: ${insights?.avgShares || 0}
-Average Views: ${insights?.avgViews || 0}
-Engagement Level: ${insights?.engagementLevel || "Unknown"}
+SCRAPER STATUS:
+${JSON.stringify(
+  {
+    scraperStatus,
+    scraperError,
+  },
+  null,
+  2
+)}
 
-SAMPLE POST TEXT
-${insights?.samplePostText?.length ? insights.samplePostText.map((t, i) => `${i + 1}. ${t}`).join("\n") : "No scraped post samples available"}
-
-SCORES
-Overall Score: ${scores.overallScore}/100
-Visibility Score: ${scores.visibilityScore}/100
-Content Score: ${scores.contentScore}/100
-Consistency Score: ${scores.consistencyScore}/100
-Engagement Score: ${scores.engagementScore}/100
-Growth Potential Score: ${scores.growthPotentialScore}/100
-
-TASK:
-Write the report in these exact sections:
-
-1. Personalized Overview
-- Speak directly to ${name}
-- Mention the goal
-- Mention the Facebook URL
-- Explain what is happening on this page in plain English
-
-2. What We Analyzed
-- Bullet-style explanation in paragraph form of what was analyzed:
-  profile setup, visibility, engagement signals, content patterns, consistency
-
-3. Visibility Analysis
-- Explain whether visibility/discoverability is helping or hurting growth
-
-4. Engagement Analysis
-- Use the real numbers
-- Explain what they mean
-- If the page has a lot of followers but weak engagement, say that directly
-
-5. Top 3 Growth Blockers
-- Give 3 specific blockers
-- They must feel real and tied to this user's data and goals
-
-6. Top 3 Strengths
-- Give 3 genuine positives
-- If data is limited, still find legitimate positives
-
-7. 7-Day Action Plan
-Use this exact format:
-Day 1:
-Day 2:
-Day 3:
-Day 4:
-Day 5:
-Day 6:
-Day 7:
-
-Each day must be specific and tactical.
-
-8. 3 Specific Post Ideas
-Use this exact format:
-Post Idea 1:
-Hook:
-What to say:
-CTA:
-
-Post Idea 2:
-Hook:
-What to say:
-CTA:
-
-Post Idea 3:
-Hook:
-What to say:
-CTA:
-
-9. 30-Day Strategy Summary
-- Explain what ${name} should focus on over the next 30 days
-- Keep it strong and specific
-
-FINAL RULES:
-- No fluff
-- No generic filler
-- No repeating the same idea
-- Make it feel worth paying for
+SCRAPED INSIGHTS:
+${JSON.stringify(insights, null, 2)}
 `;
 }
 
-async function analyzeOrder(order) {
-  const pageUrl = order.page_url || order.pageUrl || order.facebook_url || "";
+async function runAnalyzer(order) {
+  const normalizedOrder = normalizeOrder(order);
+  const pageUrl = normalizedOrder.pageUrl;
 
   let scrapedData = null;
   let scraperStatus = "not_attempted";
@@ -268,8 +155,12 @@ async function analyzeOrder(order) {
   }
 
   const insights = extractInsights(scrapedData);
-  const scores = buildScores(order, insights);
-  const prompt = buildPrompt(order, insights, scores, scraperStatus, scraperError);
+  const prompt = buildAnalyzerPrompt(
+    normalizedOrder,
+    insights,
+    scraperStatus,
+    scraperError
+  );
 
   const response = await client.chat.completions.create({
     model: "gpt-4.1-mini",
@@ -279,19 +170,48 @@ async function analyzeOrder(order) {
         content: prompt,
       },
     ],
-    temperature: 0.7,
+    temperature: 0.2,
+    response_format: { type: "json_object" },
   });
 
-  const reportText =
-    response.choices?.[0]?.message?.content || "Report could not be generated.";
+  const raw = response.choices?.[0]?.message?.content || "{}";
+
+  let analysis;
+  try {
+    analysis = JSON.parse(raw);
+  } catch (error) {
+    analysis = {
+      audit_mode: scraperStatus === "success" ? "data" : "strategy",
+      page_type: null,
+      page_name: insights?.pageName || null,
+      verified_metrics: {
+        followers: insights?.followers ?? null,
+        avg_likes: insights?.avgLikes ?? null,
+        avg_comments: insights?.avgComments ?? null,
+        avg_shares: insights?.avgShares ?? null,
+        avg_views: insights?.avgViews ?? null,
+        engagement_level: insights?.engagementLevel ?? null,
+      },
+      input_summary: {
+        goal: normalizedOrder.goal,
+        struggles: normalizedOrder.struggles,
+        posting_frequency: normalizedOrder.postingFrequency,
+        content_type: normalizedOrder.contentType,
+      },
+      core_problems: ["Analyzer parsing failed"],
+      strengths: [],
+      opportunities: [],
+      recommended_focus: [],
+      confidence_notes: ["AI JSON parsing failed"],
+    };
+  }
 
   return {
-    reportText,
-    scores,
+    analysis,
     scraperStatus,
     scraperError,
     scraperInsights: insights,
   };
 }
 
-module.exports = { analyzeOrder };
+module.exports = { runAnalyzer };

@@ -1,36 +1,20 @@
-const { analyzeOrder } = require("../services/analyzer");
+const { runAnalyzer } = require("../services/analyzer");
 
 async function routes(fastify, options) {
   fastify.post("/orders", async (request, reply) => {
     try {
       const order = request.body || {};
 
-      const analysis = await analyzeOrder(order);
-
-      const result = {
-        ...order,
-        report: analysis.reportText,
-        report_text: analysis.reportText,
-        scores: analysis.scores,
-        scraper_status: analysis.scraperStatus,
-        scraper_error: analysis.scraperError,
-        scraper_insights: analysis.scraperInsights,
-      };
-
-      if (analysis.scraperStatus === "failed") {
-        fastify.log.error(`SCRAPER FAILED: ${analysis.scraperError}`);
-      }
+      const analyzerResult = await runAnalyzer(order);
 
       return reply.send({
         success: true,
-        message: "Order processed successfully",
-        order: result,
-        report: analysis.reportText,
-        report_text: analysis.reportText,
-        scores: analysis.scores,
-        scraper_status: analysis.scraperStatus,
-        scraper_error: analysis.scraperError,
-        scraper_insights: analysis.scraperInsights,
+        message: "Analyzer completed successfully",
+        order,
+        analysis: analyzerResult.analysis,
+        scraper_status: analyzerResult.scraperStatus,
+        scraper_error: analyzerResult.scraperError,
+        scraper_insights: analyzerResult.scraperInsights,
       });
     } catch (error) {
       fastify.log.error(error);
