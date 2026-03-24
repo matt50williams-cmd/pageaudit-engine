@@ -1,95 +1,61 @@
-async function scrapeFacebookPage(pageUrl) {
+const fetch = require("node-fetch");
+
+async function runScraper(pageUrl) {
+  if (!pageUrl) {
+    return {
+      ok: false,
+      error: "Missing page URL",
+      data: null,
+    };
+  }
+
   try {
-    const response = await fetch(
-      `https://api.apify.com/v2/acts/apify~facebook-pages-scraper/run-sync-get-dataset-items?token=${process.env.APIFY_API_TOKEN}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          startUrls: [{ url: pageUrl }],
-          maxPosts: 10
-        })
-      }
-    );
+    const response = await fetch("https://api.brightdata.com/request", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.BRIGHTDATA_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url: pageUrl,
+        zone: "web_unlocker",
+        format: "json",
+      }),
+    });
+
+    const rawText = await response.text();
 
     if (!response.ok) {
-      throw new Error(`Apify request failed with status ${response.status}`);
+      return {
+        ok: false,
+        error: `Bright Data HTTP ${response.status}: ${rawText.slice(0, 300)}`,
+        data: null,
+      };
     }
 
-    const data = await response.json();
-
-    if (!data || data.length === 0) {
-      return getFallbackData(pageUrl);
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch (jsonError) {
+      return {
+        ok: false,
+        error: `Bright Data returned non-JSON response: ${rawText.slice(0, 300)}`,
+        data: null,
+      };
     }
-
-    const page = data[0];
-    const posts = page.posts || [];
 
     return {
-      scrape_success: true,
-      page_url: pageUrl,
-      page_name: page.title || 'Unknown',
-      followers: page.likes || page.followers || 0,
-      page_created_year: page.foundedDate || 'Unknown',
-      bio: page.description || '',
-      category: page.categories?.[0] || 'Unknown',
-      recent_posts: posts.slice(0, 10).map((post) => ({
-        date: post.time || '',
-        text: post.text || '',
-        type: post.type || 'text',
-        reactions: post.likes || 0,
-        comments: post.comments || 0,
-        shares: post.shares || 0
-      })),
-      posting_summary: {
-        posts_analyzed: posts.length,
-        average_days_between_posts: calculateAvgDays(posts),
-        most_active_period: 'Recent',
-        least_active_period: 'Unknown'
-      }
+      ok: true,
+      error: null,
+      data: Array.isArray(parsed) ? parsed : [parsed],
     };
   } catch (error) {
-    console.error('Scraper error:', error.message);
-    return getFallbackData(pageUrl);
+    return {
+      ok: false,
+      error: error.message || "Unknown scraper error",
+      data: null,
+    };
   }
 }
 
-function calculateAvgDays(posts) {
-  if (!posts || posts.length < 2) return 0;
-
-  const dates = posts
-    .map((p) => new Date(p.time))
-    .filter((d) => !isNaN(d.getTime()))
-    .sort((a, b) => b - a);
-
-  if (dates.length < 2) return 0;
-
-  let totalDays = 0;
-  for (let i = 0; i < dates.length - 1; i++) {
-    const diffMs = Math.abs(dates[i] - dates[i + 1]);
-    totalDays += diffMs / (1000 * 60 * 60 * 24);
-  }
-
-  return Math.round(totalDays / (dates.length - 1));
-}
-
-function getFallbackData(pageUrl) {
-  return {
-    scrape_success: false,
-    page_url: pageUrl,
-    page_name: 'Unknown',
-    followers: 0,
-    page_created_year: 'Unknown',
-    bio: '',
-    category: 'Unknown',
-    recent_posts: [],
-    posting_summary: {
-      posts_analyzed: 0,
-      average_days_between_posts: 0,
-      most_active_period: 'Unknown',
-      least_active_period: 'Unknown'
-    }
-  };
-}
-
-module.exports = { scrapeFacebookPage };
+module.exports = { runScraper };
