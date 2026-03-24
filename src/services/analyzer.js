@@ -1,97 +1,57 @@
-const prompt = `
-You are a high-level Facebook growth strategist.
+const { getClient } = require('./openai');
 
-You do NOT give generic advice.
-You provide clear, tactical, step-by-step growth plans.
+async function analyzePage(data) {
+  const client = getClient();
 
-User Data:
-Name: ${name}
-Profile: ${pageUrl}
-Account Type: ${reviewType}
-Goal: ${goals}
-Posting Frequency: ${postingFrequency}
-Content Type: ${contentType}
-Struggles: ${struggles}
-Notes: ${extraNotes}
+  const {
+    name,
+    pageUrl,
+    reviewType,
+    goals,
+    postingFrequency,
+    contentType,
+    struggles,
+    extraNotes
+  } = data || {};
 
-RULES:
-- Tie everything to the user’s goal
-- Reference their weaknesses directly
-- Be specific and actionable
-- Do NOT repeat generic phrases
-- Give real examples
+  const prompt = `
+You are a Facebook growth strategist.
 
-SCORING:
-- Weak: 30–55
-- Average: 56–75
-- Strong: 76–90
+Analyze this profile and give specific, actionable advice.
 
-RETURN JSON:
+User Info:
+Name: ${name || ''}
+Profile: ${pageUrl || ''}
+Type: ${reviewType || ''}
+Goal: ${goals || ''}
+Posting: ${postingFrequency || ''}
+Content: ${contentType || ''}
+Struggles: ${struggles || ''}
+Notes: ${extraNotes || ''}
+
+Return JSON:
 
 {
-  "user_summary": {
-    "name": "${name}",
-    "profile": "${pageUrl}",
-    "type": "${reviewType}",
-    "goal": "${goals}"
-  },
-  "overall_score": 0,
-  "score_reason": "",
-
+  "overallScore": 0,
+  "scoreReason": "",
   "strengths": [],
   "weaknesses": [],
-  "growth_limiters": [],
-
-  "priority_fixes": [
-    {
-      "title": "",
-      "why_it_matters": "",
-      "exact_action": ""
-    }
-  ],
-
-  "7_day_plan": [
-    {
-      "day": "Day 1",
-      "action": "",
-      "example": ""
-    },
-    {
-      "day": "Day 2",
-      "action": "",
-      "example": ""
-    },
-    {
-      "day": "Day 3",
-      "action": "",
-      "example": ""
-    },
-    {
-      "day": "Day 4",
-      "action": "",
-      "example": ""
-    },
-    {
-      "day": "Day 5",
-      "action": "",
-      "example": ""
-    },
-    {
-      "day": "Day 6",
-      "action": "",
-      "example": ""
-    },
-    {
-      "day": "Day 7",
-      "action": "",
-      "example": ""
-    }
-  ],
-
-  "growth_potential": {
-    "summary": "",
-    "expected_30_day_outcome": "",
-    "expected_90_day_outcome": ""
-  }
+  "priorityFixes": [],
+  "nextSteps": []
 }
 `;
+
+  const response = await client.chat.completions.create({
+    model: 'gpt-4o',
+    temperature: 0.7,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: 'Return only JSON.' },
+      { role: 'user', content: prompt }
+    ]
+  });
+
+  return JSON.parse(response.choices[0].message.content);
+}
+
+module.exports = { analyzePage };
