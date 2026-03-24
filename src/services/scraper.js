@@ -25,7 +25,6 @@ async function runScraper(pageUrl) {
       };
     }
 
-    // 1) Trigger Bright Data dataset
     const triggerResponse = await fetch(
       "https://api.brightdata.com/datasets/v3/trigger",
       {
@@ -66,10 +65,10 @@ async function runScraper(pageUrl) {
       return {
         ok: false,
         error: "Bright Data trigger succeeded but no snapshot_id was returned",
+        raw: triggerData,
       };
     }
 
-    // 2) Poll snapshot until results are ready
     const maxAttempts = 12;
     const delayMs = 5000;
 
@@ -91,6 +90,7 @@ async function runScraper(pageUrl) {
           return {
             ok: true,
             data: snapshotData,
+            snapshotId,
           };
         }
 
@@ -103,8 +103,16 @@ async function runScraper(pageUrl) {
           return {
             ok: true,
             data: snapshotData.data,
+            snapshotId,
           };
         }
+      } else {
+        const errorText = await snapshotResponse.text();
+        console.log(
+          `Bright Data snapshot attempt ${attempt} not ready:`,
+          snapshotResponse.status,
+          errorText
+        );
       }
 
       await sleep(delayMs);
@@ -113,6 +121,7 @@ async function runScraper(pageUrl) {
     return {
       ok: false,
       error: "Bright Data snapshot did not return results in time",
+      snapshotId,
     };
   } catch (error) {
     return {
@@ -123,4 +132,3 @@ async function runScraper(pageUrl) {
 }
 
 module.exports = { runScraper };
-

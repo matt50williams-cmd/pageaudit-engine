@@ -1,8 +1,11 @@
 function buildWriterPrompt(order, analysis) {
   const name = order.name || "User";
   const pageUrl = order.page_url || order.pageUrl || order.facebook_url || "";
-  const goal = order.goal || order.goals || "";
+  const goal = order.mainGoal || order.goal || "";
   const reviewType = order.review_type || order.reviewType || "";
+  const postingFrequency =
+    order.postingFrequency || order.posting_frequency || "";
+  const contentType = order.contentType || order.content_type || "";
 
   return `
 You are a senior Facebook growth strategist.
@@ -16,12 +19,25 @@ STRICT RULES:
 - Be specific, practical, and direct
 - No generic advice
 - No fluff
+- Scraped page data and analyzer findings are the primary source of truth
+- Intake answers are secondary context only
+- Do not build the report mainly from the questionnaire
+- If scraped data exists, prioritize it over intake answers
+- If scraped data is limited, use intake answers only to guide examples and recommendations
+- Do not reference business goals unless they are explicitly present in the analysis
+- Use the user's selected goal, posting frequency, and content type as supporting context
+- Tie recommendations to the user's goal when that goal is provided
+- If postingFrequency is provided, give a realistic next-step cadence based on it
+- If contentType is provided, tailor examples to that format
+- Do not let the questionnaire replace scraped data or analyzer findings
 
 USER:
 Name: ${name}
 Page: ${pageUrl}
-Goal: ${goal}
 Type: ${reviewType}
+Main Goal: ${goal || "Not provided"}
+Posting Frequency: ${postingFrequency || "Not provided"}
+Main Content Type: ${contentType || "Not provided"}
 
 ANALYSIS:
 ${JSON.stringify(analysis, null, 2)}
@@ -65,6 +81,11 @@ FRIDAY – Bold Statement
 Example:
 “The world does not need quieter Christians. It needs stronger ones.”
 
+Important:
+- Use the user's goal, posting frequency, and content type to tailor this weekly plan
+- Give specific cadence recommendations such as 3x per week, 4x per week, daily, etc.
+- Make the plan feel connected to what they are trying to achieve
+
 5. 7-Day Action Plan
 
 Day 1:
@@ -104,6 +125,10 @@ Content Idea 3:
 Hook:
 What to say:
 CTA:
+
+Important:
+- Tailor these ideas to the user's selected goal
+- Tailor these ideas to the user's selected main content type when possible
 
 7. Growth Tactics
 Give specific tactics like:

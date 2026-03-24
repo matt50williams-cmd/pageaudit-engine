@@ -10,9 +10,9 @@ function normalizeOrder(order) {
     name: order.name || null,
     email: order.email || null,
     pageUrl: order.page_url || order.pageUrl || order.facebook_url || null,
-    goal: order.goal || order.goals || null,
-    struggles: order.struggles || null,
-    reviewType: order.review_type || order.reviewType || null,
+    goal: order.mainGoal || order.goal || null,
+    struggles: null,
+    reviewType: order.review_type || order.reviewType || "Business",
     postingFrequency: order.postingFrequency || order.posting_frequency || null,
     contentType: order.contentType || order.content_type || null,
   };
@@ -20,7 +20,9 @@ function normalizeOrder(order) {
 
 function pickFirst(...values) {
   for (const value of values) {
-    if (value !== undefined && value !== null && value !== "") return value;
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
   }
   return null;
 }
@@ -180,9 +182,12 @@ Rules:
 2. Use verified_metrics only from SCRAPED INSIGHTS.
 3. Never put 0 unless it is verified.
 4. Focus on business page growth.
-5. If page type is unclear, use null.
-6. Keep items short and specific.
-7. Output JSON only.
+5. Keep items short and specific.
+6. Output JSON only.
+7. Verified scraped insights are the primary source of truth.
+8. Intake answers are supporting context only.
+9. Never infer performance metrics from intake answers.
+10. Never let questionnaire answers override scraped data.
 
 INTAKE DATA:
 ${JSON.stringify(order, null, 2)}
@@ -269,14 +274,14 @@ async function runAnalyzer(order) {
       core_problems: [
         "Analyzer JSON parsing failed",
         "Fallback analysis used",
-        "Scraped data may need field mapping"
+        "Scraped data may need field mapping",
       ],
       strengths: [],
       opportunities: [],
       recommended_focus: [],
       confidence_notes: [
         "AI JSON parsing failed",
-        "Fallback object returned"
+        "Fallback object returned",
       ],
     };
   }
