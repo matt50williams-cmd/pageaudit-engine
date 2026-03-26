@@ -72,4 +72,3 @@ async function stripeRoutes(fastify) {
 }
 
 module.exports = stripeRoutes;
-```
