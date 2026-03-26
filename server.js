@@ -12,7 +12,11 @@ app.register(cors, { origin: true, methods: ['GET','POST','PUT','DELETE','OPTION
 
 app.addContentTypeParser('application/json', { parseAs: 'string' }, function (req, body, done) {
   req.rawBody = body;
-  try { done(null, JSON.parse(body)); } catch (err) { done(err); }
+  try {
+    done(null, body ? JSON.parse(body) : {});
+  } catch (err) {
+    done(err);
+  }
 });
 
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
