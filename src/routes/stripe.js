@@ -11,7 +11,7 @@ async function stripeRoutes(fastify) {
       customer_email: email,
       metadata: { audit_id: String(audit_id), customer_name: customer_name||'', product: 'one_time_audit' },
       line_items: [{ price_data: { currency: 'usd', product_data: { name: 'Facebook Page Audit — Full Report' }, unit_amount: 3999 }, quantity: 1 }],
-      success_url: process.env.FRONTEND_URL+'/create-account?session_id={CHECKOUT_SESSION_ID}&audit_id='+audit_id,
+      success_url: process.env.FRONTEND_URL+'/?paid=true&session_id={CHECKOUT_SESSION_ID}&audit_id='+audit_id,
       cancel_url: process.env.FRONTEND_URL+'/audit-preview?cancelled=true',
     });
     await queryOne('UPDATE audits SET stripe_session_id = $1, updated_at = NOW() WHERE id = $2', [session.id, audit_id]);
@@ -72,3 +72,4 @@ async function stripeRoutes(fastify) {
 }
 
 module.exports = stripeRoutes;
+```
