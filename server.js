@@ -1,48 +1,29 @@
-const fastify = require('fastify')({ logger: true });
+require('dotenv').config();
+const Fastify = require('fastify');
 const cors = require('@fastify/cors');
+const authRoutes = require('./src/routes/auth');
+const auditRoutes = require('./src/routes/audits');
+const stripeRoutes = require('./src/routes/stripe');
+const funnelRoutes = require('./src/routes/funnel');
 
-// Routes
-const ordersRoutes = require('./src/routes/orders');
+const app = Fastify({ logger: true });
 
-async function start() {
-  try {
-    // Enable CORS
-    await fastify.register(cors, {
-      origin: true,
-      methods: ['GET', 'POST', 'OPTIONS'],
-      allowedHeaders: ['Content-Type']
-    });
+app.register(cors, { origin: true, methods: ['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] });
 
-    // Request logger (optional but helpful)
-    fastify.addHook('onRequest', async (request, reply) => {
-      console.log(`➡️ ${request.method} ${request.url}`);
-    });
+app.addContentTypeParser('application/json', { parseAs: 'string' }, function (req, body, done) {
+  req.rawBody = body;
+  try { done(null, JSON.parse(body)); } catch (err) { done(err); }
+});
 
-    // Health check route
-    fastify.get('/', async () => {
-      return { success: true, message: 'PageAudit Pro API is running 🚀' };
-    });
+app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
 
-    fastify.get('/health', async () => {
-      return { ok: true };
-    });
+app.register(authRoutes);
+app.register(auditRoutes);
+app.register(stripeRoutes);
+app.register(funnelRoutes);
 
-    // Register routes
-    fastify.register(ordersRoutes);
-
-    // ✅ CRITICAL FOR RENDER
-    const PORT = process.env.PORT || 3001;
-
-    await fastify.listen({
-      port: PORT,
-      host: '0.0.0.0'
-    });
-
-    console.log(`✅ Server running on port ${PORT}`);
-  } catch (err) {
-    fastify.log.error(err);
-    process.exit(1);
-  }
-}
-
-start();
+const PORT = process.env.PORT || 3001;
+app.listen({ port: PORT, host: '0.0.0.0' }, (err) => {
+  if (err) { console.error(err); process.exit(1); }
+  console.log('PageAudit API running on port ' + PORT);
+});

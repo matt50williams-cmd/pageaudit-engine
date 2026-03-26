@@ -1,133 +1,68 @@
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function runScraper(pageUrl) {
+  const apiKey = process.env.BRIGHTDATA_API_KEY;
+  const datasetId = process.env.BRIGHTDATA_DATASET_ID;
+
+  if (!apiKey || !datasetId) {
+    console.warn('[SCRAPER] Missing BrightData credentials');
+    return { ok: false, error: 'Missing BrightData credentials' };
+  }
+
   try {
-    if (!pageUrl) {
-      return {
-        ok: false,
-        error: "Missing page URL",
-      };
-    }
+    console.log('[SCRAPER] Starting scrape for:', pageUrl);
 
-    if (!process.env.BRIGHTDATA_API_KEY) {
-      return {
-        ok: false,
-        error: "Missing BRIGHTDATA_API_KEY environment variable",
-      };
-    }
-
-    if (!process.env.BRIGHTDATA_DATASET_ID) {
-      return {
-        ok: false,
-        error: "Missing BRIGHTDATA_DATASET_ID environment variable",
-      };
-    }
-
-    const triggerResponse = await fetch(
-      "https://api.brightdata.com/datasets/v3/trigger",
+    const triggerRes = await fetch(
+      `https://api.brightdata.com/datasets/v3/trigger?dataset_id=${datasetId}&include_errors=true`,
       {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.BRIGHTDATA_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          dataset_id: process.env.BRIGHTDATA_DATASET_ID,
-          input: [
-            {
-              url: pageUrl,
-            },
-          ],
-        }),
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ url: pageUrl }]),
       }
     );
 
-    const triggerData = await triggerResponse.json();
-
-    if (!triggerResponse.ok) {
-      return {
-        ok: false,
-        error:
-          triggerData?.message ||
-          triggerData?.error ||
-          "Bright Data trigger failed",
-      };
+    if (!triggerRes.ok) {
+      const err = await triggerRes.text();
+      return { ok: false, error: `Trigger failed: ${err}` };
     }
 
-    const snapshotId =
-      triggerData?.snapshot_id ||
-      triggerData?.snapshotId ||
-      null;
+    const triggerData = await triggerRes.json();
+    const snapshotId = triggerData.snapshot_id;
+    if (!snapshotId) return { ok: false, error: 'No snapshot ID returned' };
 
-    if (!snapshotId) {
-      return {
-        ok: false,
-        error: "Bright Data trigger succeeded but no snapshot_id was returned",
-        raw: triggerData,
-      };
-    }
+    console.log('[SCRAPER] Snapshot ID:', snapshotId);
 
-    const maxAttempts = 12;
-    const delayMs = 5000;
+    const maxAttempts = 24;
+    const pollInterval = 5000;
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const snapshotResponse = await fetch(
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+      const statusRes = await fetch(
         `https://api.brightdata.com/datasets/v3/snapshot/${snapshotId}?format=json`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${process.env.BRIGHTDATA_API_KEY}`,
-          },
-        }
+        { headers: { Authorization: `Bearer ${apiKey}` } }
       );
 
-      if (snapshotResponse.ok) {
-        const snapshotData = await snapshotResponse.json();
+      if (!statusRes.ok) continue;
 
-        if (Array.isArray(snapshotData) && snapshotData.length > 0) {
-          return {
-            ok: true,
-            data: snapshotData,
-            snapshotId,
-          };
+      const contentType = statusRes.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await statusRes.json();
+        if (data.status === 'running' || data.status === 'pending') {
+          console.log(`[SCRAPER] Still running... attempt ${attempt + 1}`);
+          continue;
         }
-
-        if (
-          snapshotData &&
-          typeof snapshotData === "object" &&
-          Array.isArray(snapshotData.data) &&
-          snapshotData.data.length > 0
-        ) {
-          return {
-            ok: true,
-            data: snapshotData.data,
-            snapshotId,
-          };
+        if (Array.isArray(data) && data.length > 0) {
+          console.log('[SCRAPER] Got results:', data.length, 'items');
+          return { ok: true, data };
         }
-      } else {
-        const errorText = await snapshotResponse.text();
-        console.log(
-          `Bright Data snapshot attempt ${attempt} not ready:`,
-          snapshotResponse.status,
-          errorText
-        );
+        if (data.error) return { ok: false, error: data.error };
       }
-
-      await sleep(delayMs);
     }
 
-    return {
-      ok: false,
-      error: "Bright Data snapshot did not return results in time",
-      snapshotId,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error.message || "Bright Data scraper failed",
-    };
+    return { ok: false, error: 'Scraper timed out after 2 minutes' };
+
+  } catch (err) {
+    console.error('[SCRAPER] Exception:', err.message);
+    return { ok: false, error: err.message };
   }
 }
 

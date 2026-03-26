@@ -1,23 +1,11 @@
-const Database = require('better-sqlite3');
-const path = require('path');
+const { Pool } = require('pg');
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
-const dbPath = path.join(__dirname, '../../pageaudit.db');
-const db = new Database(dbPath);
+async function query(text, params) {
+  const client = await pool.connect();
+  try { const result = await client.query(text, params); return result; } finally { client.release(); }
+}
+async function queryOne(text, params) { const result = await query(text, params); return result.rows[0] || null; }
+async function queryAll(text, params) { const result = await query(text, params); return result.rows; }
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    email TEXT,
-    pageUrl TEXT,
-    reviewType TEXT,
-    goals TEXT,
-    postingFrequency TEXT,
-    contentType TEXT,
-    struggles TEXT,
-    extraNotes TEXT,
-    createdAt TEXT
-  )
-`);
-
-module.exports = db;
+module.exports = { pool, query, queryOne, queryAll };

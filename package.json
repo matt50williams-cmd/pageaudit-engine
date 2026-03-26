@@ -1,23 +1,17 @@
 {
   "name": "pageaudit-engine",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "version": "2.0.0",
+  "main": "server.js",
+  "scripts": { "start": "node server.js", "db:migrate": "node src/db/migrate.js" },
   "type": "commonjs",
   "dependencies": {
     "@fastify/cors": "^11.2.0",
-    "better-sqlite3": "^12.8.0",
+    "bcryptjs": "^2.4.3",
     "dotenv": "^17.3.1",
     "fastify": "^5.8.2",
-    "nodemailer": "^8.0.3",
+    "jsonwebtoken": "^9.0.2",
     "openai": "^4.28.0",
-    "puppeteer": "^24.40.0",
+    "pg": "^8.13.1",
     "stripe": "^20.4.1"
   }
 }
