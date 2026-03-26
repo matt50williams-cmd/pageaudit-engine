@@ -86,16 +86,3 @@ The customer should think: "This was worth way more than $39.99."`;
 }
 
 module.exports = { runWriter };
-```
-
-Press **Ctrl+S** to save.
-
-That's all 12 files done! Now let's push everything to GitHub. In the terminal type these 3 commands one at a time:
-```
-git add .
-```
-```
-git commit -m "Complete PageAudit Pro backend"
-```
-```
-git push
