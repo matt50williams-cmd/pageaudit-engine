@@ -58,6 +58,15 @@ async function auditRoutes(fastify) {
     const audits = await queryAll('SELECT * FROM audits ORDER BY created_at DESC LIMIT 100');
     return reply.send(audits);
   });
+
+  fastify.delete('/api/admin/audits/:id', { preHandler: requireAuth }, async (request, reply) => {
+    if (request.user.role !== 'admin') return reply.status(403).send({ error: 'Admin access required' });
+    const { id } = request.params;
+    const audit = await queryOne('SELECT id FROM audits WHERE id = $1', [id]);
+    if (!audit) return reply.status(404).send({ error: 'Audit not found' });
+    await queryOne('DELETE FROM audits WHERE id = $1', [id]);
+    return reply.send({ success: true });
+  });
 }
 
 function calculateOverallScore(analysis) {
@@ -71,3 +80,10 @@ function calculateOverallScore(analysis) {
 }
 
 module.exports = auditRoutes;
+```
+
+Tell me when saved, then run in terminal:
+```
+git add .
+git commit -m "add delete audit endpoint"
+git push
