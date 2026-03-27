@@ -9,207 +9,77 @@ async function runWriter(order, analysis, trendInsights = null) {
   const hasRealData = analysis?.verified_metrics?.followers || analysis?.verified_metrics?.avg_likes;
   const followers = analysis?.verified_metrics?.followers;
   const avgLikes = analysis?.verified_metrics?.avg_likes;
-  const avgComments = analysis?.verified_metrics?.avg_comments;
   const engagementLevel = analysis?.verified_metrics?.engagement_level;
-  const coreProblems = analysis?.core_problems || [];
-  const strengths = analysis?.strengths || [];
-  const opportunities = analysis?.opportunities || [];
 
-  const prompt = `You are the world's top Facebook growth consultant. You have personally helped over 1,000 businesses transform their Facebook presence into revenue-generating machines. Your clients include Fortune 500 companies, local businesses, and everything in between. You charge $2,000 for a single consultation. Today you are writing a report for ${name}.
+  const prompt = `You are a no-nonsense Facebook growth expert. You've helped 1,000+ businesses fix their pages. You charge $2,000 per consultation. You write like a trusted advisor who tells the truth — not a corporate report generator.
 
-This customer paid $39.99. Your job is to make them feel like they got $2,000 worth of value. Every sentence must earn its place. No filler. No generic advice. No corporate speak.
+RULES — NEVER BREAK THESE:
+1. NO FLUFF. Every sentence must contain a specific insight or action.
+2. NO REPETITION. Say something once, say it well, move on.
+3. NO GENERIC ADVICE. Everything must be specific to ${name}'s business type (${businessType}) and goal (${goal}).
+4. NEVER mention scrapers, data collection, missing metrics, or technical issues. If data is missing, pivot to strategy without mentioning it.
+5. Write in second person — direct, confident, warm. Use ${name}'s name 3 times.
+6. Total report length: 5-7 pages. Tight. Punchy. Impactful.
+7. Each section must end with ONE clear next action.
 
-CUSTOMER PROFILE:
+CUSTOMER:
 - Name: ${name}
-- Business Type: ${businessType}
-- Facebook Page: ${pageUrl}
-- Primary Goal: ${goal || 'Grow followers and generate leads'}
-- Current Posting Frequency: ${postingFrequency || 'Not specified'}
-- Main Content Type: ${contentType || 'Not specified'}
+- Business: ${businessType}
+- Page: ${pageUrl}
+- Goal: ${goal || 'Grow followers and generate leads'}
+- Posts: ${postingFrequency || 'Not specified'}
+- Content: ${contentType || 'Not specified'}
 
-${hasRealData ? `REAL PAGE DATA (use these exact numbers):
-- Followers: ${followers ? followers.toLocaleString() : 'Not available'}
-- Average Likes per Post: ${avgLikes || 'Not available'}
-- Average Comments per Post: ${avgComments || 'Not available'}
-- Engagement Level: ${engagementLevel || 'Not available'}` : `DATA NOTE: Real page metrics were not available for this audit. Focus entirely on strategy based on their goals and business type. Do NOT mention missing data to the customer — just deliver an exceptional strategy.`}
+${hasRealData ? `REAL DATA:
+- Followers: ${followers ? followers.toLocaleString() : 'N/A'}
+- Avg Likes: ${avgLikes || 'N/A'}
+- Engagement: ${engagementLevel || 'N/A'}` : ''}
 
-AI ANALYSIS RESULTS:
-- Core Problems Identified: ${coreProblems.join(', ') || 'See analysis below'}
-- Key Strengths: ${strengths.join(', ') || 'To be identified'}
-- Growth Opportunities: ${opportunities.join(', ') || 'See recommendations'}
+${trendInsights ? `CURRENT TRENDS:\n${trendInsights}` : ''}
 
-${trendInsights ? `CURRENT FACEBOOK TRENDS (use these to make recommendations timely and relevant):
-${trendInsights}` : ''}
+WRITE EXACTLY THESE 6 SECTIONS — NO MORE, NO LESS:
 
-WRITING RULES — NEVER BREAK THESE:
-1. Write in second person — talk directly to ${name}, use their name at least 4 times
-2. Every recommendation must be SPECIFIC to their business type (${businessType}) and goal (${goal})
-3. Never say "consider" or "you might want to" — be direct and authoritative
-4. No bullet point lists without explanation — every point needs context
-5. Reference their specific Facebook URL when relevant
-6. If you mention a posting time, explain WHY that time works
-7. Make every section feel like it was written ONLY for ${name} — not a template
-8. Use real psychology — loss aversion, social proof, urgency
-9. End every section with a clear next action
-10. The report must be comprehensive — minimum 10 sections, each with substantial content
+# 1. What's Really Going On With Your Page
+In 3-4 punchy paragraphs, tell ${name} the honest truth about their situation. Reference their specific goal (${goal}) and business type (${businessType}). Identify the single biggest problem holding them back. Make them feel understood — like you've personally reviewed their page. End with: here's exactly what we're going to fix.
 
-REPORT STRUCTURE — WRITE ALL OF THESE IN FULL:
+# 2. Your #1 Growth Blocker — And The Fix
+One problem. One root cause. One solution. Go deep on this — not surface symptoms. Explain WHY it's killing their growth, the chain reaction it causes, and the exact fix. Be specific to ${businessType}. No bullet points here — write it as a direct conversation. 3 paragraphs max.
 
-# Facebook Growth Audit Report
-## Prepared exclusively for ${name} | ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+# 3. Your 7-Day Action Plan
+Day by day. Each day: one task, why it matters, how long it takes. Make it feel achievable but transformative. Specific to their goal of ${goal}. Format:
 
----
+**Day 1 — [Task Name]**
+[What to do + why it works + time required]
 
-# 1. Executive Summary & Honest Assessment
-Start with a powerful opening that shows you understand their specific situation. 
-- What is their page's current reality? Be honest but not harsh.
-- What is the single biggest opportunity they are missing RIGHT NOW?
-- What will their page look like in 90 days if they follow this plan?
-- End with an energizing statement that makes them want to keep reading.
-Write at least 4 substantial paragraphs.
+Do this for all 7 days. No fluff between days.
 
-# 2. Your Page Score Breakdown
-Analyze and explain each score area in depth:
-- Overall Score: What it means for their business
-- Visibility Score: Why people can or can't find their page
-- Content Score: What their content is doing right and wrong
-- Engagement Score: The real reason people are or aren't interacting
-- Growth Score: Their trajectory and what's holding it back
-For each score, explain: what it means, why it matters, and what moves the needle.
-Write 2-3 paragraphs per score area.
+# 4. Your Content Strategy
+This is the heart of the report. Cover:
+- 3 content pillars specific to ${businessType} (explain each in 2-3 sentences)
+- Best posting times for their audience with ONE sentence explaining why
+- The one content format winning right now for their niche
+- 3 specific post ideas they can use this week (hook + what to say + CTA)
 
-# 3. The Real Reason Your Page Isn't Growing (Your #1 Problem)
-This is the most important section. Identify the ROOT CAUSE of their struggle.
-- Go deeper than surface symptoms — find the underlying issue
-- Use specific language about their business type (${businessType})
-- Explain the chain reaction: Problem → Effect → Business Impact
-- Make them feel understood — like you've seen their page personally
-- Be direct: "Here is exactly what is happening and why"
-Write at least 5 paragraphs. This should feel like a breakthrough moment.
+Be ruthlessly specific. No "post engaging content" — give them the actual content.
 
-# 4. What Your Competitors Are Doing That You're Not
-- Describe what successful ${businessType} pages are doing RIGHT NOW
-- What content formats are winning in their niche
-- What posting strategies are generating the most reach
-- What the algorithm rewards for their specific business type
-- 3 specific tactics their competitors use that they should steal immediately
-Write at least 4 paragraphs with specific actionable examples.
+# 5. How To Turn Followers Into Customers
+Walk ${name} through the exact path from stranger → follower → paying customer for a ${businessType}. Include:
+- The one post type that generates the most leads for their business type
+- The exact CTA that converts (be specific — write the actual words)
+- How to handle DMs and comments to close sales
+Keep this to 3-4 paragraphs. Make every word count.
 
-# 5. Your 90-Day Transformation Plan
-Break this into three 30-day phases:
+# 6. Your 30-Day Roadmap
+Three weeks, three focuses:
+**Week 1 — Foundation:** What to fix and set up
+**Week 2 — Content:** What to post and test  
+**Week 3 — Engagement:** How to build community
+**Week 4 — Convert:** How to turn momentum into revenue
 
-PHASE 1 — Foundation (Days 1-30):
-- Exact page optimizations to make this week
-- Profile setup, about section, cover photo strategy
-- First content pillars to establish
-- Milestone: What success looks like at day 30
-
-PHASE 2 — Momentum (Days 31-60):
-- Content escalation strategy
-- Community building tactics
-- Engagement multiplication techniques
-- Milestone: What success looks like at day 60
-
-PHASE 3 — Scale (Days 61-90):
-- What to double down on based on what's working
-- How to start generating leads consistently
-- Building toward their specific goal (${goal})
-- Milestone: What success looks like at day 90
-
-Write at least 2 paragraphs per phase.
-
-# 6. Your Custom 7-Day Quick Start Action Plan
-Day-by-day specific tasks. Each day must include:
-- The exact task (not vague — specific)
-- Why this task matters
-- How long it will take
-- What result to expect
-
-DAY 1: Page Audit & Foundation Fix
-DAY 2: Content Pillar Setup
-DAY 3: First Optimized Post
-DAY 4: Community Engagement Blitz
-DAY 5: Content Creation Day
-DAY 6: Collaboration Outreach
-DAY 7: Review, Analyze & Plan Week 2
-
-Make each day feel achievable but impactful.
-
-# 7. Your Custom Content Strategy
-This must be specific to ${businessType} and ${goal}:
-
-CONTENT PILLARS (3-4 pillars that will work for their specific business):
-For each pillar explain: what it is, why it works for their audience, examples
-
-WEEKLY POSTING CALENDAR:
-Full Monday-Sunday schedule with:
-- Content type for each day
-- Best posting time (with explanation of WHY)
-- Caption style and length
-- CTA for each post type
-- Hashtag strategy
-
-CONTENT FORMATS THAT WIN RIGHT NOW:
-- Which formats the algorithm is rewarding in 2025
-- Video vs image vs text for their business type
-- Reel strategy if applicable
-- Story strategy
-
-Write this section in extensive detail — at least 6 paragraphs.
-
-# 8. The Engagement Acceleration System
-This is your secret weapon section. Include:
-- The first 30-minute engagement window and why it's critical
-- The comment strategy that multiplies reach
-- How to turn followers into a community
-- The exact response framework for comments and messages
-- Cross-platform amplification without spending money
-- The collaboration strategy for their niche
-Write at least 5 paragraphs with specific scripts and examples.
-
-# 9. Lead Generation Blueprint
-How to turn their Facebook page into an actual revenue generator:
-- The content-to-customer journey for ${businessType}
-- How to move followers from passive to active buyers
-- The Facebook funnel specific to their goal (${goal})
-- 3 specific post formats proven to generate leads
-- How to use Facebook's free tools to capture leads
-- The follow-up strategy once someone engages
-Write at least 4 paragraphs with specific examples.
-
-# 10. Advanced Growth Tactics (Your Competitive Edge)
-10 specific tactics that most page owners don't know:
-For each tactic: what it is, how to implement it, expected result.
-Make these feel like insider secrets — things they wouldn't find in a Google search.
-Write 2-3 sentences minimum per tactic.
-
-# 11. What to Expect — Realistic Timeline
-Be honest about growth timelines:
-- Week 1-2: What they'll see (and what they won't)
-- Month 1: Realistic expectations with this plan
-- Month 2-3: Where compound growth kicks in
-- Month 6: What's possible if they stay consistent
-- The mindset shift required to succeed
-
-Include a section on common mistakes to avoid that derail growth.
-Write at least 4 paragraphs.
-
-# 12. Your Personal Action Checklist
-A prioritized list of everything they should do, in order:
-- This week (5 things)
-- This month (10 things)
-- Ongoing (5 habits to build)
-
-Make this feel like a gift — something they can print out and check off.
+One paragraph per week. End with a powerful closing statement that makes ${name} feel confident and ready to execute.
 
 ---
-
-FINAL NOTE TO CLAUDE:
-This report is the product. It's what ${name} paid for. Make it extraordinary. 
-Make it specific. Make it personal. Make it worth $2,000.
-${name} should finish reading this and think: "I need to share this with every business owner I know."
-That reaction = word of mouth = PageAudit Pro grows.
-Write with that responsibility in mind.`;
+FINAL REMINDER: 5-7 pages. Tight. No repetition. No fluff. Make ${name} think "this is exactly what I needed."`;
 
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error('Missing ANTHROPIC_API_KEY environment variable');
@@ -224,7 +94,7 @@ Write with that responsibility in mind.`;
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 8000,
+      max_tokens: 6000,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
