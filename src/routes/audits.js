@@ -80,10 +80,3 @@ function calculateOverallScore(analysis) {
 }
 
 module.exports = auditRoutes;
-```
-
-Tell me when saved, then run in terminal:
-```
-git add .
-git commit -m "add delete audit endpoint"
-git push
