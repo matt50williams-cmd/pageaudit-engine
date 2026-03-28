@@ -29,6 +29,17 @@ async function websiteRoutes(fastify) {
               /https?:\/\/(www\.)?facebook\.com\/([^"'\s><,\/?#]+)/gi,
             ];
 
+            const skip = [
+              'sharer', 'share', 'dialog', 'login', 'plugins',
+              'tr', 'pages', 'groups', 'events', 'marketplace', 'watch',
+              'gaming', 'ads', 'business', 'help', 'policies', 'legal',
+              'photo', 'photos', 'video', 'videos', 'profile', 'profile.php',
+              'home', 'about', 'posts', 'reels', 'reviews', 'mentions',
+              'community', 'questions', 'services', 'jobs', 'map', 'likes',
+              'friends', 'music', 'movies', 'books', 'apps', 'interests',
+              'notifications', 'messages', 'search', 'hashtag', 'stories'
+            ];
+
             const found = new Set();
             for (const pattern of fbPatterns) {
               const matches = [...html.matchAll(pattern)];
@@ -38,18 +49,15 @@ async function websiteRoutes(fastify) {
                   .replace(/https?:\/\/(www\.)?facebook\.com\//i, '')
                   .replace(/\/$/, '')
                   .split('?')[0]
-                  .split('/')[0];
+                  .split('/')[0]
+                  .split('#')[0];
 
-                const skip = ['sharer', 'share', 'dialog', 'login', 'plugins', 
-                  'tr', 'pages', 'groups', 'events', 'marketplace', 'watch', 
-                  'gaming', 'ads', 'business', 'help', 'policies', 'legal',
-                  'photo', 'photos', 'video', 'videos', 'profile'];
-                  
                 if (username && 
                     !skip.includes(username.toLowerCase()) && 
                     username.length > 4 && 
                     !username.includes('=') &&
                     !username.includes('%') &&
+                    !username.includes('.php') &&
                     !/^\d+$/.test(username)) {
                   found.add(`https://www.facebook.com/${username}`);
                 }
@@ -75,15 +83,20 @@ async function websiteRoutes(fastify) {
                   max_tokens: 100,
                   messages: [{
                     role: 'user',
-                    content: `Find the Facebook page URL in this HTML. Return ONLY the full URL like "https://www.facebook.com/pagename" or "NOT_FOUND". The URL must contain a real page username, not just a number. Nothing else.\n\n${truncatedHtml}`
+                    content: `Find the Facebook BUSINESS PAGE URL in this HTML. It must be a real page like "https://www.facebook.com/BusinessName" — NOT profile.php, NOT a number-only ID, NOT generic Facebook URLs. Return ONLY the URL or "NOT_FOUND".\n\n${truncatedHtml}`
                   }]
                 })
               });
               const claudeData = await claudeRes.json();
               const result = claudeData?.content?.[0]?.text?.trim();
               if (result && result !== 'NOT_FOUND' && result.includes('facebook.com')) {
-                const username = result.replace(/https?:\/\/(www\.)?facebook\.com\//i, '').replace(/\/$/, '').split('?')[0];
-                if (!/^\d+$/.test(username) && username.length > 4) {
+                const username = result
+                  .replace(/https?:\/\/(www\.)?facebook\.com\//i, '')
+                  .replace(/\/$/, '')
+                  .split('?')[0];
+                if (!/^\d+$/.test(username) && 
+                    username.length > 4 && 
+                    !username.includes('.php')) {
                   facebookUrl = result;
                 }
               }
@@ -131,38 +144,6 @@ HTML: ${truncatedHtml}`
         }
       }
 
-      // BRIGHTDATA FALLBACK — if no Facebook URL found yet
-      if (!facebookUrl && business_name && process.env.BRIGHTDATA_API_KEY) {
-        try {
-          console.log('Trying BrightData for:', business_name);
-          
-          const bdResponse = await fetch('https://api.brightdata.com/datasets/v3/trigger?dataset_id=gd_lkaxegm826bjpoo9m5&include_errors=true', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${process.env.BRIGHTDATA_API_KEY}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify([{
-              url: `https://www.facebook.com/search/pages/?q=${encodeURIComponent(business_name)}`,
-              num_of_posts: 1,
-            }]),
-            signal: AbortSignal.timeout(10000)
-          });
-
-          if (bdResponse.ok) {
-            const bdData = await bdResponse.json();
-            console.log('BrightData response:', JSON.stringify(bdData).slice(0, 200));
-            
-            if (bdData?.snapshot_id) {
-              // Store snapshot_id for later retrieval — async collection
-              facebookUrl = null; // Will be retrieved separately
-            }
-          }
-        } catch (bdErr) {
-          console.error('BrightData fallback failed:', bdErr.message);
-        }
-      }
-
       return reply.send({
         success: true,
         facebook_url: facebookUrl,
@@ -177,4 +158,3 @@ HTML: ${truncatedHtml}`
 }
 
 module.exports = websiteRoutes;
-
