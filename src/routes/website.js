@@ -39,13 +39,14 @@ Return nothing else.`
                   maxOutputTokens: 100,
                 }
               }),
-              signal: AbortSignal.timeout(10000)
+              signal: AbortSignal.timeout(15000)
             }
           );
 
           if (geminiRes.ok) {
             const geminiData = await geminiRes.json();
             const result = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+            console.log('Gemini raw result:', JSON.stringify(geminiData?.candidates?.[0]));
             console.log('Gemini result:', result);
             
             if (result && result !== 'NOT_FOUND' && result.includes('facebook.com')) {
