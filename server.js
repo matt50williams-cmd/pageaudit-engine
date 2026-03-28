@@ -5,10 +5,15 @@ const authRoutes = require('./src/routes/auth');
 const auditRoutes = require('./src/routes/audits');
 const stripeRoutes = require('./src/routes/stripe');
 const funnelRoutes = require('./src/routes/funnel');
+const proxyRoutes = require('./src/routes/proxy');
 
 const app = Fastify({ logger: true });
 
-app.register(cors, { origin: true, methods: ['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] });
+app.register(cors, { 
+  origin: true, 
+  methods: ['GET','POST','PUT','DELETE','OPTIONS'], 
+  allowedHeaders: ['Content-Type','Authorization'] 
+});
 
 app.addContentTypeParser('application/json', { parseAs: 'string' }, function (req, body, done) {
   req.rawBody = body;
@@ -25,6 +30,7 @@ app.register(authRoutes);
 app.register(auditRoutes);
 app.register(stripeRoutes);
 app.register(funnelRoutes);
+app.register(proxyRoutes);
 
 const PORT = process.env.PORT || 3001;
 app.listen({ port: PORT, host: '0.0.0.0' }, (err) => {
