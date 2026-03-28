@@ -50,7 +50,15 @@ async function websiteRoutes(fastify) {
                     !skip.includes(username.toLowerCase()) && 
                     username.length > 2 && 
                     !username.includes('=') &&
-                    !username.includes('%')) {
+                    !username.includes('%') &&
+    !/^\d+$/.test(username) &&
+    username.length > 4) {
+```
+
+This filters out pure numbers like `2008` and anything under 4 characters.
+
+
+
                   found.add(`https://www.facebook.com/${username}`);
                 }
               }
