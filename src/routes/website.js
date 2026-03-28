@@ -25,7 +25,6 @@ async function websiteRoutes(fastify) {
           if (response.ok) {
             const html = await response.text();
 
-            // Extract Facebook URL directly from HTML
             const fbPatterns = [
               /https?:\/\/(www\.)?facebook\.com\/([^"'\s><,\/?#]+)/gi,
             ];
@@ -48,17 +47,10 @@ async function websiteRoutes(fastify) {
                   
                 if (username && 
                     !skip.includes(username.toLowerCase()) && 
-                    username.length > 2 && 
+                    username.length > 4 && 
                     !username.includes('=') &&
                     !username.includes('%') &&
-    !/^\d+$/.test(username) &&
-    username.length > 4) {
-```
-
-This filters out pure numbers like `2008` and anything under 4 characters.
-
-
-
+                    !/^\d+$/.test(username)) {
                   found.add(`https://www.facebook.com/${username}`);
                 }
               }
@@ -68,7 +60,6 @@ This filters out pure numbers like `2008` and anything under 4 characters.
               facebookUrl = Array.from(found)[0];
             }
 
-            // If not found directly, ask Claude
             if (!facebookUrl && process.env.ANTHROPIC_API_KEY) {
               const truncatedHtml = html.slice(0, 10000);
               const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -94,7 +85,6 @@ This filters out pure numbers like `2008` and anything under 4 characters.
               }
             }
 
-            // Get SEO score
             if (process.env.ANTHROPIC_API_KEY) {
               const truncatedHtml = html.slice(0, 15000);
               const seoRes = await fetch('https://api.anthropic.com/v1/messages', {
