@@ -6,6 +6,7 @@ const auditRoutes = require('./src/routes/audits');
 const stripeRoutes = require('./src/routes/stripe');
 const funnelRoutes = require('./src/routes/funnel');
 const proxyRoutes = require('./src/routes/proxy');
+const websiteRoutes = require('./src/routes/website');
 
 const app = Fastify({ logger: true });
 
@@ -24,13 +25,14 @@ app.addContentTypeParser('application/json', { parseAs: 'string' }, function (re
   }
 });
 
-app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+app.get('/health', async () => ({ status: 'ok', version: '1.1', timestamp: new Date().toISOString() }));
 
 app.register(authRoutes);
 app.register(auditRoutes);
 app.register(stripeRoutes);
 app.register(funnelRoutes);
 app.register(proxyRoutes);
+app.register(websiteRoutes);
 
 const PORT = process.env.PORT || 3001;
 app.listen({ port: PORT, host: '0.0.0.0' }, (err) => {
