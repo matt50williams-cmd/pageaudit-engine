@@ -60,6 +60,7 @@ async function websiteRoutes(fastify) {
               facebookUrl = Array.from(found)[0];
             }
 
+            // If not found directly, ask Claude
             if (!facebookUrl && process.env.ANTHROPIC_API_KEY) {
               const truncatedHtml = html.slice(0, 10000);
               const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -74,17 +75,21 @@ async function websiteRoutes(fastify) {
                   max_tokens: 100,
                   messages: [{
                     role: 'user',
-                    content: `Find the Facebook page URL in this HTML. Return ONLY the URL like "https://www.facebook.com/pagename" or "NOT_FOUND". Nothing else.\n\n${truncatedHtml}`
+                    content: `Find the Facebook page URL in this HTML. Return ONLY the full URL like "https://www.facebook.com/pagename" or "NOT_FOUND". The URL must contain a real page username, not just a number. Nothing else.\n\n${truncatedHtml}`
                   }]
                 })
               });
               const claudeData = await claudeRes.json();
               const result = claudeData?.content?.[0]?.text?.trim();
               if (result && result !== 'NOT_FOUND' && result.includes('facebook.com')) {
-                facebookUrl = result;
+                const username = result.replace(/https?:\/\/(www\.)?facebook\.com\//i, '').replace(/\/$/, '').split('?')[0];
+                if (!/^\d+$/.test(username) && username.length > 4) {
+                  facebookUrl = result;
+                }
               }
             }
 
+            // Get SEO score
             if (process.env.ANTHROPIC_API_KEY) {
               const truncatedHtml = html.slice(0, 15000);
               const seoRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -126,6 +131,38 @@ HTML: ${truncatedHtml}`
         }
       }
 
+      // BRIGHTDATA FALLBACK — if no Facebook URL found yet
+      if (!facebookUrl && business_name && process.env.BRIGHTDATA_API_KEY) {
+        try {
+          console.log('Trying BrightData for:', business_name);
+          
+          const bdResponse = await fetch('https://api.brightdata.com/datasets/v3/trigger?dataset_id=gd_lkaxegm826bjpoo9m5&include_errors=true', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.BRIGHTDATA_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify([{
+              url: `https://www.facebook.com/search/pages/?q=${encodeURIComponent(business_name)}`,
+              num_of_posts: 1,
+            }]),
+            signal: AbortSignal.timeout(10000)
+          });
+
+          if (bdResponse.ok) {
+            const bdData = await bdResponse.json();
+            console.log('BrightData response:', JSON.stringify(bdData).slice(0, 200));
+            
+            if (bdData?.snapshot_id) {
+              // Store snapshot_id for later retrieval — async collection
+              facebookUrl = null; // Will be retrieved separately
+            }
+          }
+        } catch (bdErr) {
+          console.error('BrightData fallback failed:', bdErr.message);
+        }
+      }
+
       return reply.send({
         success: true,
         facebook_url: facebookUrl,
@@ -140,3 +177,4 @@ HTML: ${truncatedHtml}`
 }
 
 module.exports = websiteRoutes;
+
