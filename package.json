@@ -2,7 +2,10 @@
   "name": "pageaudit-engine",
   "version": "2.0.0",
   "main": "server.js",
-  "scripts": { "start": "node server.js", "db:migrate": "node src/db/migrate.js" },
+  "scripts": {
+    "start": "node server.js",
+    "db:migrate": "node src/db/migrate.js"
+  },
   "type": "commonjs",
   "dependencies": {
     "@fastify/cors": "^11.2.0",
