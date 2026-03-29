@@ -19,16 +19,17 @@ async function facebookRoutes(fastify) {
             body: JSON.stringify({
               contents: [{
                 parts: [{
-                  text: `Find the Facebook business page for "${business_name}"${city ? ` in ${city}` : ''}${website_url ? ` (website: ${website_url})` : ''}.
-Return up to 3 real Facebook page URLs.
+                  text: `Find the official Facebook BUSINESS PAGE URL for "${business_name}"${city ? ` in ${city}` : ''}${website_url ? ` (website: ${website_url})` : ''}.
+Rules:
+- Only return real Facebook business page URLs
+- Must be in format: https://www.facebook.com/pagename OR https://www.facebook.com/profile.php?id=NUMBER
+- Do NOT return tracking URLs with tr?id= or pixel URLs
+- Do NOT return facebook.com/share or facebook.com/sharer URLs
 Return ONLY a JSON array like: ["url1","url2"]`
                 }]
               }],
               tools: [{ google_search: {} }],
-              generationConfig: {
-                temperature: 0,
-                maxOutputTokens: 200,
-              }
+              generationConfig: { temperature: 0, maxOutputTokens: 200 }
             })
           }
         );
@@ -40,14 +41,10 @@ Return ONLY a JSON array like: ["url1","url2"]`
             try {
               const cleaned = result.replace(/```json|```/g, '').trim();
               const urls = JSON.parse(cleaned);
-              if (Array.isArray(urls)) {
-                candidates.push(...urls.filter(isValidFbUrl));
-              }
+              if (Array.isArray(urls)) candidates.push(...urls.filter(isValidFbUrl));
             } catch {
               const matches = result.match(/https?:\/\/(www\.)?facebook\.com\/[^\s"',\]]+/g);
-              if (matches) {
-                candidates.push(...matches.filter(isValidFbUrl));
-              }
+              if (matches) candidates.push(...matches.filter(isValidFbUrl));
             }
           }
         }
@@ -87,18 +84,16 @@ Return ONLY a JSON array like: ["url1","url2"]`
             max_tokens: 200,
             messages: [{
               role: 'user',
-              content: `Guess the most likely Facebook page URL for this business:
-Business name: "${business_name}"${city ? `\nCity: ${city}` : ''}${website_url ? `\nWebsite: ${website_url}` : ''}
+              content: `Guess the most likely Facebook business page URL for:
+Business: "${business_name}"${city ? `\nCity: ${city}` : ''}
 
 Rules:
-- Return ONLY a JSON array of 1-3 plausible Facebook URLs
-- Use common patterns like facebook.com/businessname or facebook.com/businessnamecity
-- Only include facebook.com URLs
-- No explanation, just the JSON array
-
-Example: ["https://www.facebook.com/allredheating","https://www.facebook.com/allredheatingeverett"]`
+- Return ONLY a JSON array of 1-3 plausible Facebook page URLs
+- Format must be https://www.facebook.com/businessname
+- Do NOT include tr?id= tracking URLs
+- No explanation, just the JSON array`
             }],
-            system: 'You are a Facebook URL guesser. Return ONLY a valid JSON array of Facebook URLs. No other text.'
+            system: 'You are a Facebook URL guesser. Return ONLY a valid JSON array of Facebook page URLs. No tracking URLs.'
           })
         });
 
@@ -109,14 +104,10 @@ Example: ["https://www.facebook.com/allredheating","https://www.facebook.com/all
             try {
               const cleaned = text.replace(/```json|```/g, '').trim();
               const urls = JSON.parse(cleaned);
-              if (Array.isArray(urls)) {
-                candidates.push(...urls.filter(isValidFbUrl).map(u => ({ url: u, isGuess: true })));
-              }
+              if (Array.isArray(urls)) candidates.push(...urls.filter(isValidFbUrl));
             } catch {
               const matches = text.match(/https?:\/\/(www\.)?facebook\.com\/[^\s"',\]]+/g);
-              if (matches) {
-                candidates.push(...matches.filter(isValidFbUrl).map(u => ({ url: u, isGuess: true })));
-              }
+              if (matches) candidates.push(...matches.filter(isValidFbUrl));
             }
           }
         }
@@ -125,28 +116,12 @@ Example: ["https://www.facebook.com/allredheating","https://www.facebook.com/all
       }
     }
 
-    const normalized = candidates.map(c => {
-      if (typeof c === 'string') return { url: c, isGuess: false };
-      return c;
-    });
-
-    const deduped = [];
-    const seen = new Set();
-    for (const item of normalized) {
-      if (!seen.has(item.url)) {
-        seen.add(item.url);
-        deduped.push(item);
-      }
-    }
-
-    const final = deduped.slice(0, 5);
+    const deduped = [...new Set(candidates)].slice(0, 3);
 
     return reply.send({
       success: true,
-      candidates: final.map(c => c.url),
-      candidatesWithMeta: final,
-      found: final.length > 0,
-      hasGuesses: final.some(c => c.isGuess),
+      candidates: deduped,
+      found: deduped.length > 0,
     });
   });
 }
@@ -155,12 +130,27 @@ function isValidFbUrl(url) {
   if (!url) return false;
   if (typeof url !== 'string') return false;
   if (!url.includes('facebook.com')) return false;
-  const lower = url.toLowerCase();
-  if (lower.includes('facebook.com/sharer')) return false;
-  if (lower.includes('facebook.com/share')) return false;
-  if (lower.includes('facebook.com/login')) return false;
-  if (lower.includes('facebook.com/help')) return false;
-  if (lower.includes('facebook.com/policies')) return false;
+
+  // Block tracking and non-page URLs
+  const blocked = [
+    'tr?id=', 'tr/?id=', '/tr?', 
+    'facebook.com/sharer', 'facebook.com/share',
+    'facebook.com/login', 'facebook.com/help',
+    'facebook.com/policies', 'facebook.com/groups',
+    'facebook.com/events', 'facebook.com/watch',
+    'facebook.com/ads', 'facebook.com/photos',
+    'facebook.com/videos', '/l.php', 'l.facebook.com',
+    'facebook.com/dialog', 'facebook.com/marketplace',
+  ];
+
+  for (const block of blocked) {
+    if (url.toLowerCase().includes(block.toLowerCase())) return false;
+  }
+
+  // Must have something after facebook.com/
+  const path = url.split('facebook.com/')[1];
+  if (!path || path.length < 3) return false;
+
   return true;
 }
 
