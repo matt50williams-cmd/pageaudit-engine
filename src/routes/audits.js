@@ -203,7 +203,7 @@ async function auditRoutes(fastify) {
     }
   });
 
-  fastify.get("/api/audits/:id", async (request, reply) => {
+  fastify.post("/api/audits/:id/seo-score", async (request, reply) => { try { const { score } = request.body || {}; await queryOne("UPDATE audits SET seo_score = $1, updated_at = NOW() WHERE id = $2", [score, request.params.id]); return reply.send({ success: true }); } catch (err) { return reply.status(500).send({ error: "Failed" }); } }); fastify.get("/api/audits/:id", async (request, reply) => {
     try {
       const audit = await queryOne("SELECT * FROM audits WHERE id = $1", [request.params.id]);
 
@@ -331,3 +331,4 @@ function clamp(value) {
 }
 
 module.exports = auditRoutes;
+
