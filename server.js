@@ -9,6 +9,7 @@ const stripeRoutes = require("./src/routes/stripe");
 const funnelRoutes = require("./src/routes/funnel");
 const proxyRoutes = require("./src/routes/proxy");
 const websiteRoutes = require("./src/routes/website");
+const seoRoutes = require("./src/routes/seo");
 
 // Optional route: only load if the file exists in your project
 let facebookRoutes = null;
@@ -59,6 +60,7 @@ async function registerRoutes() {
   app.register(funnelRoutes);
   app.register(proxyRoutes);
   app.register(websiteRoutes);
+  app.register(seoRoutes);
 
   if (facebookRoutes) {
     app.register(facebookRoutes);
@@ -83,3 +85,4 @@ async function start() {
 }
 
 start();
+
