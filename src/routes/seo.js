@@ -55,117 +55,119 @@ async function runSeoReport(websiteUrl, email, auditId, options = {}) {
     const passedList = Object.entries(checks).filter(([, v]) => v).map(([k]) => k);
 
     const checkLabels = {
-      hasTitle: "Page Title (10+ characters)",
-      hasMetaDesc: "Meta Description (50+ characters)",
-      hasH1: "H1 Heading Tag",
-      hasOgTags: "Open Graph / Social Sharing Tags",
-      hasMobile: "Mobile Viewport Tag",
-      hasSSL: "HTTPS / SSL Certificate",
-      fastPageLoad: "Page Size Under 100KB",
-      hasAnalytics: "Analytics / Tracking Installed",
-      hasPhoneNumber: "Phone Number on Page",
-      hasAddress: "Business Address on Page",
-      hasPrivacyPolicy: "Privacy Policy Link",
-      hasSocialLinks: "Social Media Links (non-Facebook)",
+      hasTitle: "Website Name in Browser Tab",
+      hasMetaDesc: "Google Preview Text",
+      hasH1: "Main Page Headline",
+      hasOgTags: "Social Media Preview (what shows when someone shares your link)",
+      hasMobile: "Mobile-Friendly Setup",
+      hasSSL: "Security Lock (the padlock in the browser)",
+      fastPageLoad: "Fast Loading Speed",
+      hasAnalytics: "Visitor Tracking (seeing who visits your site)",
+      hasPhoneNumber: "Phone Number on Your Website",
+      hasAddress: "Business Address on Your Website",
+      hasPrivacyPolicy: "Privacy Policy Page",
+      hasSocialLinks: "Links to Your Social Media Accounts",
     };
 
-    const failedReadable = failed.map(k => `FAIL: ${checkLabels[k] || k}`).join("\n");
-    const passedReadable = passedList.map(k => `PASS: ${checkLabels[k] || k}`).join("\n");
+    const failedReadable = failed.map(k => `MISSING: ${checkLabels[k] || k}`).join("\n");
+    const passedReadable = passedList.map(k => `GOOD: ${checkLabels[k] || k}`).join("\n");
 
-    const prompt = `You are a no-nonsense SEO expert who has audited 1,000+ small business websites. You charge $2,000 per consultation. You write like a trusted advisor — direct, specific, no fluff.
+    const prompt = `You are a friendly website expert who helps small business owners get found on Google. You explain everything like you're talking to a plumber, restaurant owner, or hair salon — never use developer jargon. When you must reference code, present it as "ask your website person to paste this" or "if you use Wix/Squarespace/WordPress, here's where to find this setting."
 
 ABSOLUTE RULES:
-1. Every recommendation MUST reference "${businessName}" by name and "${websiteUrl}" specifically. NO generic advice.
-2. For every FAILED check, provide the EXACT HTML code or text they need to add to fix it. Write it ready to copy and paste.
-3. NO FLUFF. Every sentence must contain a specific insight or action for ${businessName}.
-4. NO REPETITION. Say something once, say it well, move on.
+1. NEVER use technical terms. Say "Google preview text" not "meta description." Say "main headline" not "H1 tag." Say "security lock" not "SSL certificate." Say "social media preview" not "Open Graph tags." Say "visitor tracking" not "analytics." Say "business info card" not "schema markup."
+2. Every recommendation MUST reference "${businessName}" by name. NO generic advice.
+3. For every MISSING item, explain what it is in one plain sentence, why it costs ${businessName} customers, and give the exact text or steps to fix it.
+4. When you show code, always explain it as: "Have your website person paste this into your site" or "In [Wix/Squarespace/WordPress], go to Settings > [specific menu]."
 5. Use "${customerName || businessName}" by name 3-4 times throughout.
-6. Total report: 5-7 pages. Tight. Punchy. Impactful.
+6. Write like you're sitting across the table from a business owner explaining their website. Warm, direct, no fluff.
+7. Total report: 5-7 pages.
 
 BUSINESS PROFILE:
 - Business Name: ${businessName}
 - Website: ${websiteUrl}
 - City: ${city || "Not specified"}
-- Email: ${email}
-- Current Title Tag: ${existingTitle ? `"${existingTitle}"` : "MISSING"}
-- Current Meta Description: ${existingDesc ? `"${existingDesc.substring(0, 120)}..."` : "MISSING"}
+- What currently shows in their browser tab: ${existingTitle ? `"${existingTitle}"` : "NOTHING — it's blank or says something generic"}
+- What currently shows on Google under their link: ${existingDesc ? `"${existingDesc.substring(0, 120)}..."` : "NOTHING — Google is making up its own description"}
 
-SEO SCORE: ${score}/100 (${passed}/${total} checks passed)
+WEBSITE SCORE: ${score}/100 (${passed} out of ${total} items are set up correctly)
 
-PASSED CHECKS:
+WHAT'S WORKING:
 ${passedReadable}
 
-FAILED CHECKS (these are what's hurting ${businessName}):
-${failedReadable || "None — all checks passed!"}
+WHAT'S MISSING (costing ${businessName} customers right now):
+${failedReadable || "Nothing — everything looks great!"}
 
 WRITE EXACTLY THESE SECTIONS:
 
-# 1. ${businessName}'s SEO Score: ${score}/100
-Start with a 2-3 paragraph honest assessment of where ${businessName}'s website stands in Google search results${city ? ` for customers in ${city}` : ""}. Reference the specific score breakdown — ${passed} passed, ${failed.length} failed. Tell them exactly what this means in terms of customers they're losing. Make it feel personal and urgent.
+# 1. ${businessName}'s Website Score: ${score}/100
+In 2-3 paragraphs, explain what this score means for ${businessName} in plain English${city ? ` — specifically for customers in ${city} searching on Google` : ""}. Don't say "SEO" — say "how easy it is for customers to find you on Google." Explain that ${passed} things are set up right but ${failed.length} important things are missing. Tell them exactly what that means: "Right now, when someone in ${city || 'your area'} searches for a business like yours, Google doesn't have enough information about ${businessName} to show you near the top."
 
-# 2. Critical Fixes: What's Hurting ${businessName} Right Now
-For EACH failed check, write a subsection with:
-- **What's wrong**: One sentence explaining the problem in plain English
-- **Why it matters**: How this specifically hurts ${businessName}${city ? ` in ${city}` : ""} (lost customers, lower rankings, etc.)
-- **Exact fix**: The literal HTML code, text, or setting they need to add/change. Write it so they can copy and paste it.
-${!checks.hasTitle ? `\nFor the missing/weak title tag, write the exact <title> tag ${businessName} should use, optimized for "${businessName}"${city ? ` in ${city}` : ""}.` : ""}
-${!checks.hasMetaDesc ? `\nFor the missing meta description, write the exact <meta name="description" content="..."> tag ${businessName} should use, 150-160 characters, mentioning ${businessName}${city ? ` and ${city}` : ""}.` : ""}
-${!checks.hasH1 ? `\nFor the missing H1, write the exact <h1> tag ${businessName} should add to their homepage.` : ""}
-${!checks.hasOgTags ? `\nFor missing Open Graph tags, write ALL the og: meta tags ${businessName} needs (og:title, og:description, og:image, og:url).` : ""}
-${!checks.hasAnalytics ? `\nFor missing analytics, provide the exact Google Analytics 4 setup instructions and code snippet for ${businessName}.` : ""}
-${!checks.hasPhoneNumber ? `\nFor missing phone number, show exactly where and how to add a clickable tel: link on the page.` : ""}
-${!checks.hasAddress ? `\nFor missing address, show the exact HTML with schema markup ${businessName} should add${city ? ` with their ${city} address` : ""}.` : ""}
-${!checks.hasPrivacyPolicy ? `\nFor missing privacy policy, explain why it's required and where to add the link.` : ""}
-${!checks.hasSocialLinks ? `\nFor missing social links, show the exact HTML for a social media links section.` : ""}
-If all checks passed, congratulate them and explain what to optimize next for even higher rankings.
+# 2. What's Missing — And Exactly How to Fix It
+For EACH missing item, write a subsection like this:
+
+**[Plain English Name of What's Missing]**
+- **What this is**: One sentence a restaurant owner would understand. Example: "This is the short description that shows up under your website link on Google."
+- **What it's costing ${businessName}**: How this specifically loses customers${city ? ` in ${city}` : ""}. Be concrete: "When someone searches '${businessName}${city ? ` ${city}` : ''}', Google shows your link but the description underneath is random text from your page instead of something that makes people want to click."
+- **How to fix it**: Step-by-step instructions. First explain it for someone who uses a website builder (Wix, Squarespace, WordPress), then show the exact text or code to use. Always write the actual content for them — don't say "write a description," give them the description.
+${!checks.hasTitle ? `\nFor the missing browser tab name: write the exact text ${businessName} should use. Example format: "${businessName}${city ? ` | Trusted [Service] in ${city}` : ' | [What They Do]'}"` : ""}
+${!checks.hasMetaDesc ? `\nFor the missing Google preview text: write the exact 150-160 character description ${businessName} should use. This is what shows up under their link on Google — make it compelling and mention ${businessName}${city ? ` and ${city}` : ""}.` : ""}
+${!checks.hasH1 ? `\nFor the missing main headline: write the exact headline ${businessName} should put at the top of their homepage. This is the big text visitors see first.` : ""}
+${!checks.hasOgTags ? `\nFor the missing social media preview: explain that when someone shares ${businessName}'s link on Facebook or text message, it shows a blank box instead of a nice preview with their name and image. Show them how to fix it.` : ""}
+${!checks.hasAnalytics ? `\nFor the missing visitor tracking: explain that ${businessName} has no way of knowing how many people visit their website, where they come from, or what pages they look at. Walk them through setting up Google Analytics step by step — explain it like they've never heard of it.` : ""}
+${!checks.hasPhoneNumber ? `\nFor the missing phone number: explain that customers who find ${businessName} on their phone can't tap to call. Show them exactly where to put their phone number and how to make it clickable.` : ""}
+${!checks.hasAddress ? `\nFor the missing address: explain that Google doesn't know where ${businessName} is located, so it can't show them to nearby customers. Show them how to add their address${city ? ` in ${city}` : ""} in a way Google can read it.` : ""}
+${!checks.hasPrivacyPolicy ? `\nFor the missing privacy policy: explain in plain English why every business website needs one (it's not just legal — Google actually checks for it) and how to add one in 5 minutes.` : ""}
+${!checks.hasSocialLinks ? `\nFor the missing social media links: explain that linking to their Instagram, Facebook, etc. from their website helps Google trust that ${businessName} is a real, active business.` : ""}
+If everything passed, congratulate them and tell them 3 things to do next to rank even higher.
 
 # 3. What ${businessName} Is Doing Right
-Go through each PASSED check and explain why it matters and how to make it even better. Be specific — don't just say "good job", tell them the next level optimization for each.
+Go through each item that passed. For each one, explain what it is in plain English, why it matters, and one tip to make it even better. Keep it positive and encouraging.
 
-# 4. ${businessName}'s Google Ranking Opportunities${city ? ` in ${city}` : ""}
-Based on ${businessName}'s business type and location, identify:
-- 5 specific keywords ${businessName} should target${city ? ` in ${city}` : ""}
-- The #1 local SEO opportunity they're missing
-- How to optimize their Google Business Profile for these keywords
-- One competitor research tactic they can do today
+# 4. How to Get More ${city || "Local"} Customers From Google
+Write this for a business owner who has never thought about Google rankings:
+- 5 things people actually type into Google when looking for a business like ${businessName}${city ? ` in ${city}` : ""}
+- The #1 free thing ${businessName} can do to show up higher (Google Business Profile)
+- How to check if ${businessName} shows up when people search${city ? ` in ${city}` : ""}
+- One thing their competitors are probably doing that ${businessName} isn't
 
-# 5. ${businessName}'s 30-Day SEO Action Plan
-Build this ONLY around the checks that FAILED. Each week should fix specific failed items:
-**Week 1 — Critical Fixes:** Fix the most impactful failed checks (title, meta desc, H1)
-**Week 2 — Technical SEO:** Fix remaining technical issues (SSL, speed, analytics)
-**Week 3 — Local SEO:** Add address, phone, social links, Google Business Profile
-**Week 4 — Content & Growth:** Start content strategy, build backlinks, monitor rankings
-One paragraph per week with specific tasks tied to ${businessName}'s actual failures.
+# 5. ${businessName}'s 30-Day Fix-It Plan
+Build this ONLY around what's actually missing. Plain English, no jargon:
+**Week 1 — The Basics:** Fix the most important missing items (browser tab name, Google preview text, main headline). Tell them exactly what to do each day.
+**Week 2 — Get Tracked:** Set up visitor tracking, make sure the security lock is on, speed up the site. Step by step.
+**Week 3 — Get Local:** Add phone number, address, social media links. Set up Google Business Profile if they haven't.
+**Week 4 — Get Found:** Start showing up in more searches. Simple content ideas, ask for reviews, share their website.
+One paragraph per week with specific actions.
 
 # 6. Quick Wins: Fix These in 10 Minutes
-List the 3-5 fastest fixes from the failed checks. For EACH one:
-- What to do (one sentence)
-- The exact code or text to copy and paste
-- Where to put it (which file or which part of their website builder)
-Write these so a non-technical business owner can do them TODAY without hiring a developer.
+The 3-5 fastest fixes ${businessName} can do RIGHT NOW. For each one:
+- What to do (one sentence, plain English)
+- The exact text, steps, or settings to change
+- Where to find it: "In WordPress, go to Settings > General" or "In Wix, click Site Menu > SEO" or "Ask your website person to paste this"
+Write these for someone who is not technical. If they use Wix, Squarespace, or WordPress, tell them the exact menu to click.
 
-# 7. ${businessName}'s SEO Scorecard
-Create a scorecard grading these 4 areas out of 25 each (total /100):
+# 7. ${businessName}'s Website Report Card
+Grade ${businessName} on these 4 areas. Give each a score out of 25 (total out of 100) and one specific fix:
 
-**Technical Foundation: __/25**
-Based on: SSL, page speed, mobile viewport, analytics
-Fix: [One specific action]
+**Can Customers Find You? __/25**
+Based on: Browser tab name, Google preview text, main headline, social media preview
+Fix: [One plain-English action]
 
-**On-Page SEO: __/25**
-Based on: Title tag, meta description, H1, Open Graph tags
-Fix: [One specific action]
+**Is Your Site Fast and Secure? __/25**
+Based on: Security lock, loading speed, mobile-friendly, visitor tracking
+Fix: [One plain-English action]
 
-**Local Visibility: __/25**
-Based on: Phone number, address, social links${city ? `, ${city} mentions` : ""}
-Fix: [One specific action]
+**Can Customers Contact You? __/25**
+Based on: Phone number, business address, social media links${city ? `, ${city} presence` : ""}
+Fix: [One plain-English action]
 
-**Trust & Compliance: __/25**
-Based on: Privacy policy, analytics, page structure
-Fix: [One specific action]
+**Does Google Trust You? __/25**
+Based on: Privacy policy, visitor tracking, site structure
+Fix: [One plain-English action]
 
 **TOTAL: ${score}/100**
 
-End with a powerful one-line statement that makes ${customerName || businessName} feel confident about fixing their SEO.`;
+End with one encouraging sentence that makes ${customerName || businessName} feel like they CAN fix this and it WILL bring them more customers.`;
 
     const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -223,7 +225,7 @@ async function seoRoutes(fastify) {
           },
           quantity: 1,
         }],
-        success_url: `${frontendUrl}/dashboard?seo_success=true&audit_id=${audit.id}`,
+        success_url: `${frontendUrl}/seo-loading?audit_id=${audit.id}`,
         cancel_url: `${frontendUrl}/seo-audit?cancelled=true`,
       });
 
