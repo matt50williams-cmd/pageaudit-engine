@@ -21,6 +21,7 @@ async function auditRoutes(fastify) {
         utm_campaign,
         utm_adset,
         utm_ad,
+        facebook_not_found,
       } = request.body || {};
 
       if (!email) {
@@ -47,13 +48,14 @@ async function auditRoutes(fastify) {
           city,
           business_name,
           status,
+          facebook_not_found,
           utm_source,
           utm_campaign,
           utm_adset,
           utm_ad
         )
         VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
         )
         RETURNING *
         `,
@@ -69,6 +71,7 @@ async function auditRoutes(fastify) {
           cleanCity,
           cleanBusinessName,
           "pending",
+          facebook_not_found || false,
           utm_source || null,
           utm_campaign || null,
           utm_adset || null,
