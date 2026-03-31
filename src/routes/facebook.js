@@ -131,25 +131,47 @@ function isValidFbUrl(url) {
   if (typeof url !== 'string') return false;
   if (!url.includes('facebook.com')) return false;
 
-  // Block tracking and non-page URLs
+  const lower = url.toLowerCase();
+
+  // Block tracking, non-page, and utility URLs
   const blocked = [
-    'tr?id=', 'tr/?id=', '/tr?', 
-    'facebook.com/sharer', 'facebook.com/share',
-    'facebook.com/login', 'facebook.com/help',
-    'facebook.com/policies', 'facebook.com/groups',
-    'facebook.com/events', 'facebook.com/watch',
-    'facebook.com/ads', 'facebook.com/photos',
-    'facebook.com/videos', '/l.php', 'l.facebook.com',
-    'facebook.com/dialog', 'facebook.com/marketplace',
+    'tr?id=', 'tr/?id=', '/tr?',
+    '/sharer', '/share', '/dialog',
+    '/login', '/help', '/policies',
+    '/groups', '/events', '/watch',
+    '/ads', '/photos', '/videos',
+    '/posts', '/reels', '/reviews',
+    '/messages', '/marketplace',
+    '/l.php', 'l.facebook.com',
+    '/2008/', '/fbml', '/plugins',
+    '/hashtag', '/stories', '/gaming',
+    '/fundraisers', '/bookmarks',
+    '/flx/', '/privacy', '/settings',
+    '/notifications', '/feed',
   ];
 
   for (const block of blocked) {
-    if (url.toLowerCase().includes(block.toLowerCase())) return false;
+    if (lower.includes(block)) return false;
   }
 
   // Must have something after facebook.com/
-  const path = url.split('facebook.com/')[1];
-  if (!path || path.length < 3) return false;
+  const pagePath = url.split('facebook.com/')[1];
+  if (!pagePath) return false;
+
+  // Get the first path segment (before any / ? #)
+  const slug = pagePath.split(/[/?#]/)[0];
+  if (!slug || slug.length < 3) return false;
+
+  // Allow profile.php?id=NUMBER format
+  if (pagePath.startsWith('profile.php')) {
+    return /profile\.php\?id=\d+/.test(pagePath);
+  }
+
+  // Reject paths that are just numbers (user IDs, not page slugs)
+  if (/^\d+$/.test(slug)) return false;
+
+  // Reject slugs that look like internal Facebook paths
+  if (/^(p|pages|people|public)$/i.test(slug)) return false;
 
   return true;
 }
