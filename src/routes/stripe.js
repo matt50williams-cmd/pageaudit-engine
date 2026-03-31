@@ -203,9 +203,13 @@ async function stripeRoutes(fastify) {
           ).catch(() => null);
 
           if (product === "seo_audit") {
-            const audit = await queryOne("SELECT website, email FROM audits WHERE id = $1", [auditId]);
+            const audit = await queryOne("SELECT website, email, customer_name, business_name, city FROM audits WHERE id = $1", [auditId]);
             if (audit?.website) {
-              runSeoReport(audit.website, audit.email, auditId).catch((err) =>
+              runSeoReport(audit.website, audit.email, auditId, {
+                businessName: audit.business_name || audit.customer_name || audit.website,
+                city: audit.city || '',
+                customerName: audit.customer_name || '',
+              }).catch((err) =>
                 console.error("Auto SEO report failed:", err.message)
               );
             }
