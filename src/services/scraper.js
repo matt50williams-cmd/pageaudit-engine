@@ -6,14 +6,16 @@ function fetchViaProxy(targetUrl, timeout = 20000) {
     const BRIGHT_USER = process.env.BRIGHTDATA_USERNAME;
     const BRIGHT_PASS = process.env.BRIGHTDATA_PASSWORD;
     const BRIGHT_HOST = process.env.BRIGHTDATA_HOST || 'brd.superproxy.io';
-    const BRIGHT_PORT = parseInt(process.env.BRIGHTDATA_PORT || '33335');
+    const BRIGHT_PORT = parseInt(process.env.BRIGHTDATA_PORT || '22225');
 
     if (!BRIGHT_USER || !BRIGHT_PASS) {
       return reject(new Error('Missing BrightData proxy credentials'));
     }
 
     const target = new URL(targetUrl);
-    const auth = Buffer.from(`${BRIGHT_USER}:${BRIGHT_PASS}`).toString('base64');
+    const proxyUser = BRIGHT_USER.includes('-country-') ? BRIGHT_USER : `${BRIGHT_USER}-country-us`;
+    const auth = Buffer.from(`${proxyUser}:${BRIGHT_PASS}`).toString('base64');
+    console.log(`[SCRAPER] Proxy: ${proxyUser}@${BRIGHT_HOST}:${BRIGHT_PORT}`);
 
     const connectReq = http.request({
       host: BRIGHT_HOST,
