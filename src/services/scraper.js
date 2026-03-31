@@ -189,12 +189,16 @@ async function runScraper(pageUrl) {
 
     const res = await fetchViaProxy(pageUrl, 25000);
 
+    console.log(`[SCRAPER] Response ok=${res.ok}, HTML length=${res.html?.length || 0}`);
+    console.log(`[SCRAPER] HTML preview:`, (res.html || '').substring(0, 500));
+
     if (!res.ok) {
       return { ok: false, error: `Page fetch failed` };
     }
 
-    const { posts, pageName, followers } = parsePageFromHtml(res.html);
-    console.log(`[SCRAPER] Extracted: ${pageName || 'unknown page'}, ${followers || '?'} followers, ${posts.length} posts`);
+    const parsed = parsePageFromHtml(res.html);
+    const { posts, pageName, followers, category } = parsed;
+    console.log(`[SCRAPER] Parsed result:`, JSON.stringify({ pageName, followers, category, postCount: posts.length, samplePost: posts[0] || null }, null, 2));
 
     if (posts.length === 0 && !followers) {
       // Even without posts, return basic page info so the analyzer has something
