@@ -6,8 +6,12 @@ function computeSeoScore(html, url) {
   checks.hasOgTags = /og:title/i.test(html);
   checks.hasMobile = /viewport/i.test(html);
   checks.hasSSL = url.startsWith('https');
-  checks.hasSchema = /application\/ld\+json/i.test(html);
-  checks.hasAltTags = /<img[^>]+alt=["'][^"']{3,}/i.test(html);
+  checks.fastPageLoad = html.length < 100000;
+  checks.hasAnalytics = /google-analytics|googletagmanager|gtag|fbevents|facebook\.net\/en_US\/fbevents|clarity\.ms|hotjar|plausible|fathom/i.test(html);
+  checks.hasPhoneNumber = /(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})|tel:/i.test(html);
+  checks.hasAddress = /\b\d{2,5}\s+[A-Z][a-z]+\s+(St|Ave|Blvd|Dr|Rd|Ln|Way|Ct|Pl|Pkwy|Hwy|Suite|Ste)\b/i.test(html) || /\b[A-Z][a-z]+,\s?[A-Z]{2}\s?\d{5}\b/.test(html);
+  checks.hasPrivacyPolicy = /privacy.?policy|\/privacy/i.test(html);
+  checks.hasSocialLinks = /instagram\.com|twitter\.com|x\.com|linkedin\.com|youtube\.com|tiktok\.com/i.test(html);
   const passed = Object.values(checks).filter(Boolean).length;
   const score = Math.round((passed / Object.keys(checks).length) * 100);
   return { score, checks };
