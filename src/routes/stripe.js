@@ -172,7 +172,7 @@ async function stripeRoutes(fastify) {
         const product = session.metadata?.product;
         const amountPaid = typeof session.amount_total === "number" ? session.amount_total / 100 : null;
 
-        if (product === "one_time_audit" && auditId) {
+        if ((product === "one_time_audit" || product === "seo_audit") && auditId) {
           await queryOne(
             `
             UPDATE audits

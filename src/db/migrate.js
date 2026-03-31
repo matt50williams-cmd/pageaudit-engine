@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS audits (
   report_text TEXT, analysis JSONB, overall_score NUMERIC, visibility_score NUMERIC,
   content_score NUMERIC, consistency_score NUMERIC, engagement_score NUMERIC, growth_score NUMERIC,
   data_confidence TEXT, scraper_status TEXT, scraper_data JSONB, stripe_session_id TEXT,
-  paid BOOLEAN DEFAULT FALSE, amount_paid NUMERIC, utm_source TEXT, utm_campaign TEXT,
+  paid BOOLEAN DEFAULT FALSE, amount_paid NUMERIC, website TEXT, city TEXT,
+  business_name TEXT, seo_score NUMERIC, utm_source TEXT, utm_campaign TEXT,
   utm_adset TEXT, utm_ad TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE TABLE IF NOT EXISTS funnel_events (
