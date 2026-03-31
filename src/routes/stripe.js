@@ -1,5 +1,6 @@
 const Stripe = require("stripe");
 const { queryOne } = require("../db");
+const { runSeoReport } = require("./seo");
 
 if (!process.env.STRIPE_SECRET_KEY) {
   throw new Error("STRIPE_SECRET_KEY is required");
@@ -200,6 +201,15 @@ async function stripeRoutes(fastify) {
               }),
             ]
           ).catch(() => null);
+
+          if (product === "seo_audit") {
+            const audit = await queryOne("SELECT website, email FROM audits WHERE id = $1", [auditId]);
+            if (audit?.website) {
+              runSeoReport(audit.website, audit.email, auditId).catch((err) =>
+                console.error("Auto SEO report failed:", err.message)
+              );
+            }
+          }
         }
 
         if (product === "monthly_growth_plan") {

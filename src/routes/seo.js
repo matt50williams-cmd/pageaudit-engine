@@ -144,3 +144,4 @@ async function seoRoutes(fastify) {
 }
 
 module.exports = seoRoutes;
+module.exports.runSeoReport = runSeoReport;
