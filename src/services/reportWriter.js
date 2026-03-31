@@ -5,81 +5,155 @@ async function runWriter(order, analysis, trendInsights = null) {
   const postingFrequency = order.postingFrequency || order.posting_frequency || '';
   const contentType = order.contentType || order.content_type || '';
   const businessType = order.account_type || order.businessType || 'Business';
+  const city = order.city || '';
+  const businessName = order.businessName || order.business_name || name;
+  const facebookNotFound = order.facebookNotFound || false;
 
   const hasRealData = analysis?.verified_metrics?.followers || analysis?.verified_metrics?.avg_likes;
   const followers = analysis?.verified_metrics?.followers;
   const avgLikes = analysis?.verified_metrics?.avg_likes;
   const engagementLevel = analysis?.verified_metrics?.engagement_level;
 
-  const prompt = `You are a no-nonsense Facebook growth expert. You've helped 1,000+ businesses fix their pages. You charge $2,000 per consultation. You write like a trusted advisor who tells the truth — not a corporate report generator.
+  const section1 = facebookNotFound
+    ? `# 1. Your #1 Problem: Nobody Can Find You
 
-RULES — NEVER BREAK THESE:
-1. NO FLUFF. Every sentence must contain a specific insight or action.
-2. NO REPETITION. Say something once, say it well, move on.
-3. NO GENERIC ADVICE. Everything must be specific to ${name}'s business type (${businessType}) and goal (${goal}).
-4. NEVER mention scrapers, data collection, missing metrics, or technical issues. If data is missing, pivot to strategy without mentioning it.
-5. Write in second person — direct, confident, warm. Use ${name}'s name 3 times.
-6. Total report length: 5-7 pages. Tight. Punchy. Impactful.
-7. Each section must end with ONE clear next action.
+${businessName} has a critical visibility problem. When we searched for your Facebook page, we couldn't find it — and if our technology can't find it, your customers in ${city || 'your area'} definitely can't either. Every day this goes unfixed, potential customers are finding your competitors instead.
 
-CUSTOMER:
-- Name: ${name}
-- Business: ${businessType}
-- Page: ${pageUrl}
+Here's exactly what's happening: when someone in ${city || 'your area'} searches Facebook for "${businessName}" or a ${businessType.toLowerCase()} near them, your page either doesn't show up or is buried so deep nobody sees it. This is the single biggest thing holding your business back on Facebook right now.
+
+**Here's your step-by-step fix to make ${businessName} discoverable on Facebook:**
+
+1. **Go to your Facebook Page** → Settings → Page Info
+2. **Page Name**: Make sure it says exactly "${businessName}" — no abbreviations, no extra words
+3. **Category**: Choose the most specific category for your ${businessType.toLowerCase()} (e.g., "Local Service" or your exact industry)
+4. **Address**: Enter your full business address in ${city || 'your city'}. This is CRITICAL for local search.
+5. **Phone Number**: Add your business phone — Facebook uses this to verify you're a real business
+6. **Website**: Add your website URL${order.website ? ` (${order.website})` : ''}
+7. **Hours**: Fill out every day, even if you're closed on weekends — incomplete hours hurt your ranking
+8. **About Section**: Write 2-3 sentences that include "${businessName}", "${city || 'your city'}", and what you do. Example: "${businessName} is a trusted ${businessType.toLowerCase()} serving ${city || 'the local area'}. We specialize in [your main service]. Contact us today for [your offer]."
+9. **Profile Photo**: Use your logo or a professional headshot — NOT a blurry photo or a stock image
+10. **Cover Photo**: Use a branded image that shows what ${businessName} does — include your phone number or website on the cover image
+
+Do ALL 10 of these before anything else in this report. Once your page is findable, everything else we recommend will actually work.`
+    : `# 1. What's Really Going On With ${businessName}'s Page
+
+${name}, here's the honest truth about where ${businessName} stands on Facebook right now.${city ? ` As a ${businessType.toLowerCase()} in ${city}, you're competing with every other local business for attention in the feed.` : ''} Your stated goal is to ${goal || 'grow your Facebook presence'}, and ${hasRealData ? `with ${followers ? followers.toLocaleString() + ' followers' : 'your current audience'} and ${engagementLevel || 'moderate'} engagement, you have a foundation to build on` : `we need to build a strategy that gets you there`}.
+
+${postingFrequency === 'Rarely or never' ? `The biggest issue: you're barely posting. Facebook's algorithm forgets pages that go quiet — and so do your customers in ${city || 'your area'}. ${businessName} needs to exist in people's feeds consistently before any other strategy will work.` : postingFrequency === 'Daily' ? `You're posting daily, which is great for staying visible. But for ${businessName}, the question isn't frequency — it's whether each post is actually driving toward your goal of ${goal || 'growth'}. We found opportunities to make every post work harder.` : `Your current posting schedule of "${postingFrequency}" ${postingFrequency === 'Weekly' ? 'is a start, but' : 'shows effort, but'} ${businessName} needs more strategic consistency to ${goal || 'grow'} in ${city || 'your market'}.`}
+
+The single biggest thing holding ${businessName} back is ${analysis?.core_problems?.[0] || 'a lack of strategic focus in your content'}. Here's exactly what we're going to fix.`;
+
+  const prompt = `You are a no-nonsense Facebook growth expert who has helped 1,000+ local businesses fix their pages. You charge $2,000 per consultation. You write like a trusted advisor who tells the truth — not a corporate report generator.
+
+ABSOLUTE RULES — BREAK ANY OF THESE AND THE REPORT IS WORTHLESS:
+1. Every single recommendation MUST use "${businessName}" by name and reference "${city || 'their local area'}" specifically. NO generic advice. If you write "your business" instead of "${businessName}" you have failed.
+2. Every example post, CTA, and script must be written AS IF you are the social media manager for ${businessName}. Use their actual name, city, and business type.
+3. NO FLUFF. Every sentence must contain a specific insight or action for ${businessName}.
+4. NO REPETITION. Say something once, say it well, move on.
+5. NEVER mention scrapers, data collection, missing metrics, or technical issues.
+6. Write in second person — direct, confident, warm. Use "${name}" by name 3-4 times throughout.
+7. Total report length: 5-7 pages. Tight. Punchy. Impactful.
+8. Each section must end with ONE clear next action for ${businessName}.
+
+CUSTOMER PROFILE:
+- Owner Name: ${name}
+- Business Name: ${businessName}
+- Business Type: ${businessType}
+- City: ${city || 'Not specified'}
+- Page URL: ${pageUrl || 'Not found'}
+- Website: ${order.website || 'Not provided'}
 - Goal: ${goal || 'Grow followers and generate leads'}
-- Posts: ${postingFrequency || 'Not specified'}
-- Content: ${contentType || 'Not specified'}
+- Current Posting: ${postingFrequency || 'Not specified'}
+- Content Preference: ${contentType || 'Not specified'}
+- Facebook Page Found: ${facebookNotFound ? 'NO — page was not discoverable' : 'Yes'}
 
-${hasRealData ? `REAL DATA:
+${hasRealData ? `VERIFIED DATA:
 - Followers: ${followers ? followers.toLocaleString() : 'N/A'}
-- Avg Likes: ${avgLikes || 'N/A'}
-- Engagement: ${engagementLevel || 'N/A'}` : ''}
+- Avg Likes per Post: ${avgLikes || 'N/A'}
+- Engagement Level: ${engagementLevel || 'N/A'}` : ''}
+
+${analysis?.core_problems?.length ? `KEY PROBLEMS IDENTIFIED: ${analysis.core_problems.join('; ')}` : ''}
+${analysis?.strengths?.length ? `STRENGTHS: ${analysis.strengths.join('; ')}` : ''}
+${analysis?.opportunities?.length ? `OPPORTUNITIES: ${analysis.opportunities.join('; ')}` : ''}
 
 ${trendInsights ? `CURRENT TRENDS:\n${trendInsights}` : ''}
 
-WRITE EXACTLY THESE 6 SECTIONS — NO MORE, NO LESS:
+SECTION 1 IS PRE-WRITTEN — DO NOT WRITE SECTION 1. Start your response with Section 2.
 
-# 1. What's Really Going On With Your Page
-In 3-4 punchy paragraphs, tell ${name} the honest truth about their situation. Reference their specific goal (${goal}) and business type (${businessType}). Identify the single biggest problem holding them back. Make them feel understood — like you've personally reviewed their page. End with: here's exactly what we're going to fix.
+WRITE EXACTLY THESE SECTIONS (2 through 7):
 
-# 2. Your #1 Growth Blocker — And The Fix
-One problem. One root cause. One solution. Go deep on this — not surface symptoms. Explain WHY it's killing their growth, the chain reaction it causes, and the exact fix. Be specific to ${businessType}. No bullet points here — write it as a direct conversation. 3 paragraphs max.
+# 2. ${businessName}'s #1 Growth Blocker — And The Fix
+One problem. One root cause. One solution. Go deep — not surface symptoms. Explain WHY this specific problem is killing ${businessName}'s growth in ${city || 'their market'}, the chain reaction it causes, and the exact fix. Include a real example: "For a ${businessType.toLowerCase()} like ${businessName} in ${city || 'your area'}, this means..." 3 paragraphs max. No bullet points — write it as a direct conversation.
 
-# 3. Your 7-Day Action Plan
-Day by day. Each day: one task, why it matters, how long it takes. Make it feel achievable but transformative. Specific to their goal of ${goal}. Format:
+# 3. ${businessName}'s 7-Day Action Plan
+${goal.includes('lead') || goal.toLowerCase().includes('lead') ? `Every single day must focus on LEAD GENERATION for ${businessName}. No brand awareness tasks — every action should directly generate inquiries, DMs, or calls for ${businessName} in ${city || 'the area'}.` : goal.includes('authority') || goal.toLowerCase().includes('authority') ? `Every single day must focus on BUILDING AUTHORITY for ${businessName} in ${city || 'the area'}. Every action should position ${name} as the go-to expert ${businessType.toLowerCase()} that people trust and recommend.` : goal.includes('engagement') || goal.toLowerCase().includes('engagement') ? `Every single day must focus on DRIVING ENGAGEMENT for ${businessName}. Every action should get people commenting, sharing, and interacting with ${businessName}'s posts in ${city || 'the area'}.` : `Every single day must tie directly back to ${businessName}'s goal: ${goal || 'growing their Facebook presence'}. No generic tasks.`}
 
+Format each day like this:
 **Day 1 — [Task Name]**
-[What to do + why it works + time required]
+[What ${businessName} should do + why it works for a ${businessType.toLowerCase()} in ${city || 'their area'} + time required]
 
-Do this for all 7 days. No fluff between days.
+Include the actual post copy or script ${businessName} should use for at least 3 of the 7 days. Write it ready to copy and paste.
 
-# 4. Your Content Strategy
+# 4. ${businessName}'s Content Strategy
 This is the heart of the report. Cover:
-- 3 content pillars specific to ${businessType} (explain each in 2-3 sentences)
-- Best posting times for their audience with ONE sentence explaining why
-- The one content format winning right now for their niche
-- 3 specific post ideas they can use this week (hook + what to say + CTA)
+- **3 Content Pillars** specific to ${businessName} as a ${businessType.toLowerCase()} in ${city || 'their area'}. Explain each in 2-3 sentences with an example.
+- **Best Posting Times** for ${businessName}'s audience in ${city || 'their timezone'} with ONE sentence explaining why.
+- **The #1 Content Format** winning right now for ${businessType.toLowerCase()} businesses — explain why ${contentType ? `their current preference for "${contentType}" ${contentType === 'Videos' ? 'is smart' : 'should evolve'}` : 'this format matters'}.
 
-Be ruthlessly specific. No "post engaging content" — give them the actual content.
+Then write **3 COMPLETE EXAMPLE POSTS** ready for ${businessName} to copy and paste:
 
-# 5. How To Turn Followers Into Customers
-Walk ${name} through the exact path from stranger → follower → paying customer for a ${businessType}. Include:
-- The one post type that generates the most leads for their business type
-- The exact CTA that converts (be specific — write the actual words)
-- How to handle DMs and comments to close sales
+**Post 1 — [Pillar Name]**
+Hook: [The first line that stops the scroll — must mention ${businessName} or ${city || 'the local area'}]
+Body: [2-3 sentences]
+CTA: [Exact call-to-action with ${businessName}'s name]
+
+**Post 2 — [Pillar Name]**
+[Same format — different pillar, must reference ${city || 'local area'}]
+
+**Post 3 — [Pillar Name]**
+[Same format — different pillar, tied to their goal of ${goal || 'growth'}]
+
+# 5. How ${businessName} Turns Followers Into Customers
+Walk ${name} through the exact path: stranger → follower → paying customer for ${businessName} in ${city || 'their area'}. Include:
+- The one post type that generates the most leads for a ${businessType.toLowerCase()}
+- The exact CTA that converts — write the actual words ${businessName} should use. Example: "DM us '${city || 'FREE'}' to get..."
+- A word-for-word DM script ${businessName} can use when someone responds
+- How to handle comments to close sales — give a real example response
 Keep this to 3-4 paragraphs. Make every word count.
 
-# 6. Your 30-Day Roadmap
-Three weeks, three focuses:
-**Week 1 — Foundation:** What to fix and set up
-**Week 2 — Content:** What to post and test  
-**Week 3 — Engagement:** How to build community
-**Week 4 — Convert:** How to turn momentum into revenue
+# 6. ${businessName}'s 30-Day Roadmap
+Four weeks, four focuses:
+**Week 1 — Foundation:** What ${businessName} needs to fix and set up first
+**Week 2 — Content:** What to post and test — specific to ${businessType.toLowerCase()} in ${city || 'their area'}
+**Week 3 — Engagement:** How to build community around ${businessName}
+**Week 4 — Convert:** How to turn momentum into revenue for ${businessName}
 
-One paragraph per week. End with a powerful closing statement that makes ${name} feel confident and ready to execute.
+One paragraph per week with specific actions. End with a powerful closing statement that makes ${name} feel confident and ready to execute.
+
+# 7. ${businessName}'s Facebook Visibility Score
+Grade ${businessName} on these 4 factors. Give each a score out of 25 (total out of 100) and a specific one-line fix:
+
+**Profile Completeness: __/25**
+${facebookNotFound ? 'Score this LOW (5-10) since the page was not discoverable.' : 'Score based on what we know about their page setup.'}
+Fix: [Exact field or setting ${businessName} needs to update]
+
+**Posting Consistency: __/25**
+Based on their current frequency of "${postingFrequency || 'unknown'}".
+Fix: [Exact posting schedule ${businessName} should follow]
+
+**Engagement Rate: __/25**
+${hasRealData ? `Based on ${avgLikes || 0} avg likes and ${engagementLevel || 'unknown'} engagement.` : 'Estimated based on available signals.'}
+Fix: [One specific tactic to boost ${businessName}'s engagement]
+
+**Findability: __/25**
+${facebookNotFound ? 'Score this 0-5. The page could not be found by our automated search.' : 'Score based on how easily the page was discovered.'}
+Fix: [Exact step to make ${businessName} easier to find in ${city || 'local'} Facebook search]
+
+**TOTAL VISIBILITY SCORE: __/100**
+[One sentence summary of where ${businessName} stands and what to fix first]
 
 ---
-FINAL REMINDER: 5-7 pages. Tight. No repetition. No fluff. Make ${name} think "this is exactly what I needed."`;
+FINAL REMINDER: 5-7 pages. Every sentence must reference ${businessName}, ${city || 'their area'}, or their specific situation. NO generic advice. Make ${name} think "this person actually looked at my business."`;
 
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error('Missing ANTHROPIC_API_KEY environment variable');
@@ -102,7 +176,8 @@ FINAL REMINDER: 5-7 pages. Tight. No repetition. No fluff. Make ${name} think "t
   const data = await response.json();
   if (!response.ok) throw new Error(data?.error?.message || 'Writer request failed');
 
-  const reportText = data?.content?.[0]?.text || 'Report could not be generated.';
+  const aiText = data?.content?.[0]?.text || '';
+  const reportText = section1 + '\n\n' + aiText;
   return { reportText };
 }
 

@@ -130,6 +130,7 @@ async function auditRoutes(fastify) {
         postingFrequency: audit.posting_frequency,
         contentType: audit.content_type,
         accountType: audit.account_type,
+        facebookNotFound: audit.facebook_not_found || false,
       };
 
       const analyzerResult = await runAnalyzer(order);
@@ -306,14 +307,17 @@ function calculateScores(analysis) {
     growth = 48;
   }
 
-  if (analysis?.page_presence === "strong") visibility += 15;
-  if (analysis?.page_presence === "weak") visibility -= 10;
+  if (analysis?.page_presence === "strong") visibility += 20;
+  else if (analysis?.page_presence === "medium") visibility += 5;
+  else if (analysis?.page_presence === "weak") visibility -= 15;
 
-  if (analysis?.content_quality === "strong") content += 15;
-  if (analysis?.content_quality === "weak") content -= 10;
+  if (analysis?.content_quality === "strong") content += 20;
+  else if (analysis?.content_quality === "medium") content += 5;
+  else if (analysis?.content_quality === "weak") content -= 15;
 
-  if (analysis?.posting_consistency === "strong") consistency += 20;
-  if (analysis?.posting_consistency === "weak") consistency -= 10;
+  if (analysis?.posting_consistency === "strong") consistency += 25;
+  else if (analysis?.posting_consistency === "medium") consistency += 10;
+  else if (analysis?.posting_consistency === "weak") consistency -= 15;
 
   const overall = Math.round(
     (visibility + content + consistency + engagement + growth) / 5

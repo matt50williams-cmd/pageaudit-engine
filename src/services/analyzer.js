@@ -91,6 +91,9 @@ Return this exact shape:
     "avg_shares": number or null,
     "engagement_level": "high" or "medium" or "low" or null
   },
+  "page_presence": "strong" or "medium" or "weak",
+  "content_quality": "strong" or "medium" or "weak",
+  "posting_consistency": "strong" or "medium" or "weak",
   "input_summary": { "goal": string or null, "posting_frequency": string or null, "content_type": string or null },
   "core_problems": [string, string, string],
   "strengths": [string, string, string],
@@ -98,6 +101,25 @@ Return this exact shape:
   "recommended_focus": [string, string, string],
   "confidence_notes": [string]
 }
+
+SCORING RULES for page_presence, content_quality, and posting_consistency:
+
+page_presence (how discoverable and professional the page is):
+- "strong": page has a clear name, profile photo, cover photo, complete about section, and category. Followers > 500.
+- "medium": page exists and has basic info but is missing some elements, or followers 100-500.
+- "weak": page is hard to find, missing key info, very few followers (< 100), or scraper could not find the page.
+
+content_quality (how good the actual posts are):
+- "strong": posts are varied, include images/videos, have clear CTAs, and show business expertise. Avg likes > 20.
+- "medium": posts exist but are inconsistent in quality, mostly text or reposts. Avg likes 5-20.
+- "weak": very few posts, low effort content, no images/videos, or no posts found. Avg likes < 5.
+
+posting_consistency (how regularly they post):
+- "strong": user reports posting daily or multiple times per week AND scraped data confirms regular recent posts.
+- "medium": user reports posting weekly or a few times a week, OR data shows some gaps.
+- "weak": user reports posting rarely/never, OR data shows long gaps between posts, OR no post data available.
+
+If scraper data is unavailable, infer from the user's self-reported posting frequency and content type. Always return a value — never null.
 
 INTAKE: ${JSON.stringify(order)}
 SCRAPER STATUS: ${JSON.stringify({ scraperStatus, scraperError })}
@@ -119,6 +141,9 @@ SCRAPED INSIGHTS: ${JSON.stringify(insights)}`;
       page_name: insights?.pageName || null,
       verified_metrics: { followers: insights?.followers ?? null, avg_likes: insights?.avgLikes ?? null, avg_comments: insights?.avgComments ?? null, avg_shares: insights?.avgShares ?? null, engagement_level: insights?.engagementLevel ?? null },
       input_summary: { goal: order.mainGoal, posting_frequency: order.postingFrequency, content_type: order.contentType },
+      page_presence: scraperStatus === 'success' ? 'medium' : 'weak',
+      content_quality: insights?.avgLikes > 20 ? 'strong' : insights?.avgLikes > 5 ? 'medium' : 'weak',
+      posting_consistency: order.postingFrequency === 'Daily' ? 'strong' : order.postingFrequency === 'Rarely or never' ? 'weak' : 'medium',
       core_problems: ['Analyzer parsing failed', 'Fallback used', 'Check scraper data'],
       strengths: [], opportunities: [], recommended_focus: [], confidence_notes: ['Fallback used'],
     };

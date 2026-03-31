@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(for f:*)",
+      "Bash(do echo:*)",
+      "Bash(node --check \"$f\")",
+      "Bash(done)",
+      "Bash(node --check C:/Users/matt5/pageaudit-engine/src/routes/audits.js)",
+      "Bash(node --check C:/Users/matt5/pageaudit-engine/src/db/migrate.js)",
+      "Bash(node --check C:/Users/matt5/pageaudit-engine/src/db/add-missing-columns.js)",
+      "Bash(explorer:*)"
+    ]
+  }
+}
