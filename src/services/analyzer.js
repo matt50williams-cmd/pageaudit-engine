@@ -55,6 +55,35 @@ function extractInsights(scrapedData) {
   };
 }
 
+async function scrapeWebsite(url) {
+  if (!url) return null;
+  try {
+    let cleanUrl = url.trim();
+    if (!cleanUrl.startsWith('http')) cleanUrl = `https://${cleanUrl}`;
+    const response = await fetch(cleanUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 Chrome/120 Safari/537.36' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) return null;
+    const html = await response.text();
+    const titleMatch = html.match(/<title[^>]*>([^<]+)/i);
+    const descMatch = html.match(/meta[^>]+name=["']description["'][^>]+content=["']([^"']+)/i)
+      || html.match(/meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i);
+    const h1Match = html.match(/<h1[^>]*>([^<]+)/i);
+    const ogDescMatch = html.match(/og:description[^>]+content=["']([^"']+)/i);
+    const bodyText = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 2000);
+    return {
+      title: titleMatch?.[1]?.trim() || null,
+      description: descMatch?.[1]?.trim() || ogDescMatch?.[1]?.trim() || null,
+      h1: h1Match?.[1]?.trim() || null,
+      bodySnippet: bodyText.slice(0, 1000),
+    };
+  } catch (err) {
+    console.log('Website scrape for business type failed:', err.message);
+    return null;
+  }
+}
+
 async function runAnalyzer(order) {
   const pageUrl = order.page_url || order.pageUrl || order.facebook_url;
   let scrapedData = null;
@@ -75,6 +104,9 @@ async function runAnalyzer(order) {
     }
   }
 
+  const websiteUrl = order.website || null;
+  const websiteContext = await scrapeWebsite(websiteUrl);
+
   const insights = extractInsights(scrapedData);
 
   const prompt = `You are a Facebook business page audit analyzer.
@@ -84,6 +116,8 @@ Return this exact shape:
 {
   "audit_mode": "data" or "strategy",
   "page_name": string or null,
+  "detected_business_type": string or null,
+  "detected_services": string or null,
   "verified_metrics": {
     "followers": number or null,
     "avg_likes": number or null,
@@ -121,9 +155,17 @@ posting_consistency (how regularly they post):
 
 If scraper data is unavailable, infer from the user's self-reported posting frequency and content type. Always return a value — never null.
 
+CRITICAL RULE FOR detected_business_type AND detected_services:
+- If website context is provided below, use it to determine the ACTUAL business type and services. Read the title, description, and body text carefully.
+- If no website context is available, set both to null. Do NOT guess or assume a business type.
+- Never use generic labels like "Local Business" or "Service Provider" unless the website explicitly says that.
+- Be specific: "HVAC Contractor", "Personal Injury Law Firm", "Italian Restaurant", "Dog Grooming Salon", etc.
+- For detected_services, list the specific services mentioned on the website (e.g., "AC repair, furnace installation, duct cleaning").
+
 INTAKE: ${JSON.stringify(order)}
 SCRAPER STATUS: ${JSON.stringify({ scraperStatus, scraperError })}
-SCRAPED INSIGHTS: ${JSON.stringify(insights)}`;
+SCRAPED INSIGHTS: ${JSON.stringify(insights)}
+${websiteContext ? `WEBSITE CONTEXT:\nTitle: ${websiteContext.title || 'N/A'}\nDescription: ${websiteContext.description || 'N/A'}\nH1: ${websiteContext.h1 || 'N/A'}\nBody Snippet: ${websiteContext.bodySnippet || 'N/A'}` : 'WEBSITE CONTEXT: Not available — do NOT guess business type.'}`;
 
   const response = await client.chat.completions.create({
     model: 'gpt-4.1-mini',
@@ -149,7 +191,7 @@ SCRAPED INSIGHTS: ${JSON.stringify(insights)}`;
     };
   }
 
-  return { analysis, scraperStatus, scraperError, scraperInsights: insights };
+  return { analysis, scraperStatus, scraperError, scraperInsights: insights, websiteContext };
 }
 
 module.exports = { runAnalyzer };
