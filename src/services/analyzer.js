@@ -52,6 +52,112 @@ function extractInsights(scrapedData) {
   };
 }
 
+function cleanHtml(html) {
+  return html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<nav[\s\S]*?<\/nav>/gi, '').replace(/<footer[\s\S]*?<\/footer>/gi, '').replace(/<header[\s\S]*?<\/header>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+async function fetchPage(url) {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 Chrome/120 Safari/537.36' },
+      signal: AbortSignal.timeout(8000),
+      redirect: 'follow',
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    return html;
+  } catch {
+    return null;
+  }
+}
+
+async function scrapeWebsiteDeep(websiteUrl) {
+  if (!websiteUrl) return null;
+
+  let baseUrl = websiteUrl.trim();
+  if (!baseUrl.startsWith('http')) baseUrl = `https://${baseUrl}`;
+  baseUrl = baseUrl.replace(/\/+$/, '');
+
+  // Fetch homepage first
+  const homepageHtml = await fetchPage(baseUrl);
+  if (!homepageHtml) {
+    console.log(`[ANALYZER DEBUG] Could not fetch homepage: ${baseUrl}`);
+    return null;
+  }
+
+  // Extract internal links from homepage to find about/services/mission pages
+  const linkRegex = /href=["']([^"']+)["']/gi;
+  const links = [];
+  let match;
+  while ((match = linkRegex.exec(homepageHtml)) !== null) links.push(match[1]);
+
+  const keyPagePatterns = [
+    /\b(about|about-us|who-we-are|our-story|our-team)\b/i,
+    /\b(services|what-we-do|our-services|practice-areas|specialties)\b/i,
+    /\b(mission|values|our-mission|purpose|vision)\b/i,
+    /\b(contact|location|find-us)\b/i,
+  ];
+
+  // Resolve and deduplicate key page URLs
+  const keyPages = new Set();
+  for (const link of links) {
+    for (const pattern of keyPagePatterns) {
+      if (pattern.test(link)) {
+        try {
+          const resolved = new URL(link, baseUrl).href;
+          // Only follow links on the same domain
+          if (resolved.startsWith(baseUrl) || resolved.includes(new URL(baseUrl).hostname)) {
+            keyPages.add(resolved);
+          }
+        } catch {}
+        break;
+      }
+    }
+  }
+
+  console.log(`[ANALYZER DEBUG] Found ${keyPages.size} key pages to scrape: ${[...keyPages].join(', ')}`);
+
+  // Also try common paths if not found in links
+  const commonPaths = ['/about', '/about-us', '/services', '/our-services', '/mission', '/what-we-do'];
+  for (const path of commonPaths) {
+    const fullUrl = baseUrl + path;
+    if (!keyPages.has(fullUrl) && keyPages.size < 6) {
+      keyPages.add(fullUrl);
+    }
+  }
+
+  // Fetch all key pages in parallel (plus homepage already fetched)
+  const pageResults = await Promise.all(
+    [...keyPages].map(async (url) => {
+      const html = await fetchPage(url);
+      if (!html) return null;
+      return { url, text: cleanHtml(html).slice(0, 3000) };
+    })
+  );
+
+  const homepageText = cleanHtml(homepageHtml);
+
+  // Extract meta info from homepage
+  const titleMatch = homepageHtml.match(/<title[^>]*>([^<]+)/i);
+  const descMatch = homepageHtml.match(/meta[^>]+name=["']description["'][^>]+content=["']([^"']+)/i)
+    || homepageHtml.match(/meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i);
+  const ogDescMatch = homepageHtml.match(/og:description[^>]+content=["']([^"']+)/i);
+
+  const pages = [
+    { url: baseUrl, label: 'Homepage', text: homepageText.slice(0, 3000) },
+    ...pageResults.filter(Boolean),
+  ];
+
+  const totalChars = pages.reduce((sum, p) => sum + p.text.length, 0);
+  console.log(`[ANALYZER DEBUG] Scraped ${pages.length} pages, ${totalChars} total chars`);
+
+  return {
+    title: titleMatch?.[1]?.trim() || null,
+    description: descMatch?.[1]?.trim() || ogDescMatch?.[1]?.trim() || null,
+    pages,
+  };
+}
+
 async function runAnalyzer(order) {
   const pageUrl = order.page_url || order.pageUrl || order.facebook_url;
   let scrapedData = null;
@@ -74,17 +180,34 @@ async function runAnalyzer(order) {
 
   const websiteUrl = order.website || null;
   console.log(`[ANALYZER DEBUG] Website URL passed in: ${websiteUrl || 'NONE'}`);
+
+  // Deep-scrape the website before calling Claude
+  const websiteData = await scrapeWebsiteDeep(websiteUrl);
   const insights = extractInsights(scrapedData);
+
+  // Build website context from all scraped pages
+  let websiteContext = '';
+  if (websiteData) {
+    websiteContext = `\nWEBSITE CONTENT (scraped from ${websiteData.pages.length} pages):
+Title: ${websiteData.title || 'N/A'}
+Meta Description: ${websiteData.description || 'N/A'}
+${websiteData.pages.map(p => `\n--- ${p.label || p.url} ---\n${p.text}`).join('\n')}`;
+  }
 
   const prompt = `You are a Facebook business page audit analyzer.
 
 STEP 1 — UNDERSTAND THE BUSINESS:
-${websiteUrl ? `The business website is: ${websiteUrl}
-You MUST use the web_search tool to fetch and read this website BEFORE analyzing anything else. From the website, determine:
-- The exact business type (e.g., "HVAC Contractor", "Personal Injury Law Firm", "Italian Restaurant", "Dog Grooming Salon")
-- The specific services or products they offer
-- Their mission or value proposition
-Use ONLY what the website actually says. Do NOT guess or assume.` : `No website URL was provided. Set detected_business_type and detected_services to null. Do NOT guess the business type.`}
+${websiteData ? `We scraped the business website (${websiteUrl}) including their homepage, about page, services page, and mission page. The full content is provided below under WEBSITE CONTENT.
+
+READ ALL OF THE WEBSITE CONTENT CAREFULLY. From it, determine:
+- The EXACT business type — be very specific (e.g., "HVAC Contractor", "Personal Injury Law Firm", "Italian Restaurant", "Nonprofit Youth Ministry")
+- The specific services, products, or programs they offer
+- Their mission statement or core purpose (look for "our mission", "what we do", "about us", "who we are" sections)
+- What makes them different from competitors
+
+Use ONLY what the website actually says. Pay special attention to About, Services, Mission, and What We Do pages. The homepage alone may not tell the full story — read ALL pages provided.
+
+DO NOT default to a generic label based on the business name. For example, a business called "Righteous Law" might be a church, a nonprofit, or a legal aid organization — READ THE ACTUAL CONTENT to find out.` : `No website URL was provided. Set detected_business_type, detected_services, and detected_mission to null. Do NOT guess the business type.`}
 
 STEP 2 — ANALYZE THE FACEBOOK PAGE:
 Using the scraped Facebook data and user intake below, analyze their Facebook presence.
@@ -97,6 +220,7 @@ Return this exact shape:
   "page_name": string or null,
   "detected_business_type": string or null,
   "detected_services": string or null,
+  "detected_mission": string or null,
   "verified_metrics": {
     "followers": number or null,
     "avg_likes": number or null,
@@ -134,94 +258,54 @@ posting_consistency (how regularly they post):
 
 If scraper data is unavailable, infer from the user's self-reported posting frequency and content type. Always return a value — never null.
 
-CRITICAL RULE FOR detected_business_type AND detected_services:
-- If you fetched the website, use what you found to determine the ACTUAL business type and services.
-- If no website was provided or the fetch failed, set both to null. Do NOT guess or assume.
+CRITICAL RULES FOR BUSINESS TYPE DETECTION:
+- Read ALL website pages provided — not just the homepage. The About, Services, and Mission pages contain the most important information.
+- detected_business_type must reflect what the business ACTUALLY DOES, not what the name sounds like.
+- detected_services must list specific services/programs/products mentioned on the website.
+- detected_mission should be the business's mission statement or core purpose, quoted or closely paraphrased from the website.
+- If no website content was provided, set all three to null. Do NOT guess or assume.
 - Never use generic labels like "Local Business" or "Service Provider" unless the website explicitly says that.
-- Be specific: "HVAC Contractor", "Personal Injury Law Firm", "Italian Restaurant", "Dog Grooming Salon", etc.
-- For detected_services, list the specific services mentioned on the website (e.g., "AC repair, furnace installation, duct cleaning").
+- Be specific: "HVAC Contractor", "Personal Injury Law Firm", "Italian Restaurant", "Nonprofit Youth Ministry", etc.
 
 INTAKE: ${JSON.stringify(order)}
 SCRAPER STATUS: ${JSON.stringify({ scraperStatus, scraperError })}
-SCRAPED INSIGHTS: ${JSON.stringify(insights)}`;
+SCRAPED INSIGHTS: ${JSON.stringify(insights)}
+${websiteContext}`;
 
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error('Missing ANTHROPIC_API_KEY environment variable');
   }
 
-  const tools = websiteUrl ? [{
-    name: 'web_search',
-    description: 'Search the web or fetch a URL to read its contents',
-    input_schema: { type: 'object', properties: { query: { type: 'string', description: 'The URL or search query' } }, required: ['query'] },
-  }] : [];
-
-  let messages = [{ role: 'user', content: prompt }];
-  let analysis;
-  const maxTurns = 3;
-
-  for (let turn = 0; turn < maxTurns; turn++) {
-    const body = {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 4000,
-      messages,
-    };
-    if (tools.length > 0) body.tools = tools;
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data?.error?.message || 'Analyzer request failed');
 
-    const data = await response.json();
-    if (!response.ok) throw new Error(data?.error?.message || 'Analyzer request failed');
-
-    if (data.stop_reason === 'tool_use') {
-      const toolUseBlock = data.content.find(b => b.type === 'tool_use');
-      if (toolUseBlock) {
-        let fetchResult;
-        try {
-          let targetUrl = toolUseBlock.input?.query || websiteUrl;
-          if (!targetUrl.startsWith('http')) targetUrl = `https://${targetUrl}`;
-          const fetchRes = await fetch(targetUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 Chrome/120 Safari/537.36' },
-            signal: AbortSignal.timeout(10000),
-          });
-          if (fetchRes.ok) {
-            const html = await fetchRes.text();
-            const bodyText = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000);
-            fetchResult = bodyText;
-          } else {
-            fetchResult = `Failed to fetch: HTTP ${fetchRes.status}`;
-          }
-        } catch (err) {
-          fetchResult = `Failed to fetch: ${err.message}`;
-        }
-        console.log(`[ANALYZER DEBUG] Tool call: ${toolUseBlock.input?.query} — fetched ${typeof fetchResult === 'string' ? fetchResult.length : 0} chars`);
-        messages.push({ role: 'assistant', content: data.content });
-        messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseBlock.id, content: fetchResult }] });
-        continue;
-      }
-    }
-
-    // Extract text response
-    const textBlock = data.content?.find(b => b.type === 'text');
-    const aiText = textBlock?.text || '';
-    try {
-      const jsonMatch = aiText.match(/\{[\s\S]*\}/);
-      analysis = JSON.parse(jsonMatch ? jsonMatch[0] : aiText);
-    } catch {
-      console.log(`[ANALYZER DEBUG] JSON parse failed. Raw response: ${aiText.slice(0, 500)}`);
-      analysis = null;
-    }
-    console.log(`[ANALYZER DEBUG] detected_business_type: ${analysis?.detected_business_type || 'NULL'}`);
-    console.log(`[ANALYZER DEBUG] detected_services: ${analysis?.detected_services || 'NULL'}`);
-    break;
+  let analysis;
+  const textBlock = data.content?.find(b => b.type === 'text');
+  const aiText = textBlock?.text || '';
+  try {
+    const jsonMatch = aiText.match(/\{[\s\S]*\}/);
+    analysis = JSON.parse(jsonMatch ? jsonMatch[0] : aiText);
+  } catch {
+    console.log(`[ANALYZER DEBUG] JSON parse failed. Raw response: ${aiText.slice(0, 500)}`);
+    analysis = null;
   }
+  console.log(`[ANALYZER DEBUG] detected_business_type: ${analysis?.detected_business_type || 'NULL'}`);
+  console.log(`[ANALYZER DEBUG] detected_services: ${analysis?.detected_services || 'NULL'}`);
+  console.log(`[ANALYZER DEBUG] detected_mission: ${analysis?.detected_mission || 'NULL'}`);
 
   if (!analysis) {
     console.log(`[ANALYZER DEBUG] Using fallback — Claude response could not be parsed`);

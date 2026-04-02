@@ -6,6 +6,7 @@ async function runWriter(order, analysis, trendInsights = null) {
   const contentType = order.contentType || order.content_type || '';
   const detectedBusinessType = analysis?.detected_business_type || null;
   const detectedServices = analysis?.detected_services || null;
+  const detectedMission = analysis?.detected_mission || null;
   const businessType = detectedBusinessType || order.account_type || order.businessType || 'Business';
   const city = order.city || '';
   const businessName = order.businessName || order.business_name || name;
@@ -81,6 +82,7 @@ CUSTOMER PROFILE:
 - Business Name: ${businessName}
 - Detected Business Type: ${detectedBusinessType || 'Not detected — do NOT guess'}
 - Detected Services: ${detectedServices || 'Not detected — do NOT guess'}
+- Detected Mission: ${detectedMission || 'Not detected'}
 - User-Reported Account Type: ${order.account_type || 'Not specified'}
 - City: ${city || 'Not specified'}
 - Page URL: ${pageUrl || 'Not found'}
