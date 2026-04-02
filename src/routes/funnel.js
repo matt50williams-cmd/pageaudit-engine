@@ -39,7 +39,18 @@ async function funnelRoutes(fastify) {
       WHERE created_at >= NOW() - INTERVAL '${lookback} days' AND utm_source IS NOT NULL
       GROUP BY utm_source, utm_campaign ORDER BY purchases DESC
     `);
-    return reply.send({ funnel_counts: funnelCounts, dropoffs, campaigns, lookback_days: lookback });
+    const stepFunnel = await queryAll(`
+      SELECT event_type, COUNT(DISTINCT email) as count FROM funnel_events
+      WHERE event_type IN ('intake_started','step_1_completed','step_2_completed','step_3_completed','step_4_completed','step_5_completed','step_6_completed','intake_submitted','payment_success')
+        AND created_at >= NOW() - INTERVAL '${lookback} days'
+      GROUP BY event_type
+    `);
+    const stepOrder = ['intake_started','step_1_completed','step_2_completed','step_3_completed','step_4_completed','step_5_completed','step_6_completed','intake_submitted','payment_success'];
+    const stepLabels = { intake_started: 'Form Opened', step_1_completed: 'Step 1 — Name & Email', step_2_completed: 'Step 2 — Business Info', step_3_completed: 'Step 3 — Goals', step_4_completed: 'Step 4 — Post Frequency', step_5_completed: 'Step 5 — Content Type', step_6_completed: 'Step 6 — Facebook Page', intake_submitted: 'Audit Submitted', payment_success: 'Payment Completed' };
+    const stepMap = {};
+    stepFunnel.forEach(r => { stepMap[r.event_type] = parseInt(r.count); });
+    const steps = stepOrder.map(event_type => ({ event_type, label: stepLabels[event_type], count: stepMap[event_type] || 0 }));
+    return reply.send({ funnel_counts: funnelCounts, dropoffs, campaigns, steps, lookback_days: lookback });
   });
 
   fastify.get('/api/admin/revenue', { preHandler: requireAuth }, async (request, reply) => {
