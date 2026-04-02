@@ -8,6 +8,114 @@ function getFrontendUrl() {
   return (process.env.FRONTEND_URL || "").replace(/\/+$/, "");
 }
 
+async function researchCompetitors(websiteUrl, businessName, city) {
+  if (!process.env.ANTHROPIC_API_KEY || !city) return null;
+
+  const prompt = `You are a local SEO competitor researcher. Your job is to find the top 3 local competitors for a business and analyze what keywords they rank for.
+
+BUSINESS: ${businessName}
+WEBSITE: ${websiteUrl}
+CITY: ${city}
+
+STEPS:
+1. Use web_search to search for businesses similar to "${businessName}" in ${city}. Try searches like "${businessName} ${city} competitors" and the type of business + "${city}".
+2. Use web_search to look at what keywords the top local competitors are targeting — check their title tags, meta descriptions, and page content.
+3. Use web_search to find what people in ${city} actually search for when looking for this type of business.
+
+After your research, return ONLY valid JSON (no markdown, no code fences) in this exact shape:
+{
+  "competitors": [
+    {
+      "name": "Competitor business name",
+      "website": "https://their-website.com",
+      "strengths": "What they do well online — be specific",
+      "keywords": ["keyword1", "keyword2", "keyword3"]
+    }
+  ],
+  "top_local_keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"],
+  "keyword_gaps": ["keywords competitors rank for that ${businessName} likely doesn't"],
+  "local_search_trends": "Brief summary of what people in ${city} search for in this industry"
+}
+
+Return 3 competitors max. Return 5-10 top local keywords. Return 3-5 keyword gaps. If you cannot find competitors, return empty arrays — do NOT make up businesses.`;
+
+  try {
+    const tools = [{
+      name: 'web_search',
+      description: 'Search the web to find competitor websites and keyword data',
+      input_schema: { type: 'object', properties: { query: { type: 'string', description: 'The search query' } }, required: ['query'] },
+    }];
+
+    let messages = [{ role: 'user', content: prompt }];
+    const maxTurns = 8;
+
+    for (let turn = 0; turn < maxTurns; turn++) {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 4000,
+          tools,
+          messages,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        console.error('Competitor research API error:', data?.error?.message);
+        return null;
+      }
+
+      if (data.stop_reason === 'tool_use') {
+        const toolUseBlock = data.content.find(b => b.type === 'tool_use');
+        if (toolUseBlock) {
+          let searchResult;
+          try {
+            const query = encodeURIComponent(toolUseBlock.input?.query || '');
+            const searchRes = await fetch(`https://www.google.com/search?q=${query}&num=10`, {
+              headers: { 'User-Agent': 'Mozilla/5.0 Chrome/120 Safari/537.36' },
+              signal: AbortSignal.timeout(8000),
+            });
+            if (searchRes.ok) {
+              const html = await searchRes.text();
+              const bodyText = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000);
+              searchResult = bodyText;
+            } else {
+              searchResult = `Search returned HTTP ${searchRes.status}`;
+            }
+          } catch (err) {
+            searchResult = `Search failed: ${err.message}`;
+          }
+          messages.push({ role: 'assistant', content: data.content });
+          messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseBlock.id, content: searchResult }] });
+          continue;
+        }
+      }
+
+      const textBlock = data.content?.find(b => b.type === 'text');
+      const aiText = textBlock?.text || '';
+      try {
+        const jsonMatch = aiText.match(/\{[\s\S]*\}/);
+        return JSON.parse(jsonMatch ? jsonMatch[0] : aiText);
+      } catch {
+        console.error('Competitor research JSON parse failed');
+        return null;
+      }
+    }
+
+    console.error('Competitor research hit max turns');
+    return null;
+  } catch (err) {
+    console.error('Competitor research failed:', err.message);
+    return null;
+  }
+}
+
 async function runSeoReport(websiteUrl, email, auditId, options = {}) {
   if (!process.env.ANTHROPIC_API_KEY) return;
   const businessName = options.businessName || websiteUrl;
@@ -72,6 +180,22 @@ async function runSeoReport(websiteUrl, email, auditId, options = {}) {
     const failedReadable = failed.map(k => `MISSING: ${checkLabels[k] || k}`).join("\n");
     const passedReadable = passedList.map(k => `GOOD: ${checkLabels[k] || k}`).join("\n");
 
+    // Run competitor research in parallel with prompt construction
+    const competitorData = await researchCompetitors(websiteUrl, businessName, city);
+    const hasCompetitors = competitorData?.competitors?.length > 0;
+
+    let competitorContext = '';
+    if (hasCompetitors) {
+      competitorContext = `\nCOMPETITOR RESEARCH (from live web search):
+${competitorData.competitors.map((c, i) => `Competitor ${i + 1}: ${c.name} (${c.website})\n  Strengths: ${c.strengths}\n  Keywords: ${c.keywords?.join(', ') || 'unknown'}`).join('\n')}
+
+TOP LOCAL KEYWORDS people in ${city} search for: ${competitorData.top_local_keywords?.join(', ') || 'unknown'}
+
+KEYWORD GAPS (competitors rank for these, ${businessName} likely doesn't): ${competitorData.keyword_gaps?.join(', ') || 'unknown'}
+
+LOCAL SEARCH TRENDS: ${competitorData.local_search_trends || 'Not available'}`;
+    }
+
     const prompt = `You are a friendly website expert who helps small business owners get found on Google. You explain everything like you're talking to a plumber, restaurant owner, or hair salon — never use developer jargon. When you must reference code, present it as "ask your website person to paste this" or "if you use Wix/Squarespace/WordPress, here's where to find this setting."
 
 ABSOLUTE RULES:
@@ -81,7 +205,7 @@ ABSOLUTE RULES:
 4. When you show code, always explain it as: "Have your website person paste this into your site" or "In [Wix/Squarespace/WordPress], go to Settings > [specific menu]."
 5. Use "${customerName || businessName}" by name 3-4 times throughout.
 6. Write like you're sitting across the table from a business owner explaining their website. Warm, direct, no fluff.
-7. Total report: 5-7 pages.
+7. Total report: 7-10 pages.
 
 BUSINESS PROFILE:
 - Business Name: ${businessName}
@@ -97,6 +221,7 @@ ${passedReadable}
 
 WHAT'S MISSING (costing ${businessName} customers right now):
 ${failedReadable || "Nothing — everything looks great!"}
+${competitorContext}
 
 WRITE EXACTLY THESE SECTIONS:
 
@@ -131,7 +256,42 @@ Write this for a business owner who has never thought about Google rankings:
 - How to check if ${businessName} shows up when people search${city ? ` in ${city}` : ""}
 - One thing their competitors are probably doing that ${businessName} isn't
 
-# 5. ${businessName}'s 30-Day Fix-It Plan
+# 5. Who's Beating ${businessName} on Google${city ? ` in ${city}` : ""}
+${hasCompetitors ? `We researched ${businessName}'s top local competitors. Using the competitor research data provided above, write this section:
+- For each competitor, explain in plain English: who they are, what their website does better than ${businessName}'s, and the specific words/phrases (keywords) they show up for on Google that ${businessName} doesn't.
+- Format each competitor as a subsection:
+
+**[Competitor Name] — [their website]**
+- What they're doing right: [specific things from the research]
+- Words they show up for on Google: [list the keywords from the research in plain English]
+- What ${businessName} can steal from them: [one specific, actionable takeaway]
+
+Keep it respectful but honest. The goal is to show ${businessName} exactly what's working for competitors so they can do it too.
+
+If any competitors have weak websites (no Google preview text, no mobile setup, slow loading), call that out as an opportunity: "${businessName} can leap ahead of [Competitor] by fixing these basics first."` : `GOOD NEWS for ${businessName}: We researched competitors${city ? ` in ${city}` : ""} and most of them have a weak online presence — they're not showing up well on Google either. This is a massive opportunity.
+
+Write this section as exciting, motivating news:
+- Frame it as: "Most of your competitors are making the same mistakes — or worse. If ${businessName} fixes the issues in this report first, you won't just catch up — you'll leap ahead of everyone in ${city || 'your market'}."
+- Explain that most small businesses never fix their websites, so even basic improvements put ${businessName} in the top 10-20% of local businesses online
+- Give them 3 specific things to look for when they Google their own competitors (browser tab names, Google preview text, mobile-friendliness) so they can see for themselves how weak the competition is
+- End with a motivating statement: "The bar is low and ${businessName} is about to clear it."`}
+
+# 6. ${businessName}'s Keyword Gap — Words Customers Search That You're Missing
+${hasCompetitors ? `Using the keyword gap data from the competitor research above, write this section in plain English:
+- **What people in ${city || 'your area'} are actually typing into Google** when they need a business like ${businessName}. List each keyword/phrase and explain it like: "When someone types '[keyword]' into Google, they're looking for exactly what ${businessName} offers — but right now, ${businessName} doesn't show up for this."
+- **The gap:** Which of these words/phrases competitors rank for but ${businessName} doesn't. Explain why this matters in dollars: "Every time someone searches '[keyword]' and finds a competitor instead of ${businessName}, that's a potential customer lost."
+- **How to close the gap:** For each keyword, give ONE specific action — add it to their browser tab name, write a page about it, mention it in their Google Business Profile, etc. Plain English, no jargon.
+
+Format as a simple table or list that a business owner can hand to their website person and say "make us show up for these."` : `Here's the exciting part: since most competitors${city ? ` in ${city}` : ""} aren't optimizing for specific search phrases either, ${businessName} has a wide-open opportunity to own these searches.
+
+Write this section as an opportunity roadmap:
+- Use the "Google autocomplete trick" — explain how ${businessName} can type what they do into Google and see what real customers are searching for. Walk them through it step by step.
+- Give them 5-7 specific example search phrases customers likely use for a business like theirs${city ? ` in ${city}` : ""} (e.g., "[service type] near me", "[service type] ${city || 'in [city]'}", "best [business type] ${city || 'near me'}")
+- For each phrase, show them exactly where to add it: browser tab name, Google preview text, main headline, or a new page on their website
+- Frame this as "claiming territory" — "Right now, nobody owns these searches ${city ? `in ${city}` : ''}. ${businessName} can be first."
+- End with: "Add these phrases to your website this week and you'll start showing up where your competitors aren't even trying."`}
+
+# 7. ${businessName}'s 30-Day Fix-It Plan
 Build this ONLY around what's actually missing. Plain English, no jargon:
 **Week 1 — The Basics:** Fix the most important missing items (browser tab name, Google preview text, main headline). Tell them exactly what to do each day.
 **Week 2 — Get Tracked:** Set up visitor tracking, make sure the security lock is on, speed up the site. Step by step.
@@ -139,14 +299,14 @@ Build this ONLY around what's actually missing. Plain English, no jargon:
 **Week 4 — Get Found:** Start showing up in more searches. Simple content ideas, ask for reviews, share their website.
 One paragraph per week with specific actions.
 
-# 6. Quick Wins: Fix These in 10 Minutes
+# 8. Quick Wins: Fix These in 10 Minutes
 The 3-5 fastest fixes ${businessName} can do RIGHT NOW. For each one:
 - What to do (one sentence, plain English)
 - The exact text, steps, or settings to change
 - Where to find it: "In WordPress, go to Settings > General" or "In Wix, click Site Menu > SEO" or "Ask your website person to paste this"
 Write these for someone who is not technical. If they use Wix, Squarespace, or WordPress, tell them the exact menu to click.
 
-# 7. ${businessName}'s Website Report Card
+# 9. ${businessName}'s Website Report Card
 Grade ${businessName} on these 4 areas. Give each a score out of 25 (total out of 100) and one specific fix:
 
 **Can Customers Find You? __/25**
@@ -178,7 +338,7 @@ End with one encouraging sentence that makes ${customerName || businessName} fee
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 6000,
+        max_tokens: 8000,
         messages: [{ role: "user", content: prompt }],
       }),
     });
