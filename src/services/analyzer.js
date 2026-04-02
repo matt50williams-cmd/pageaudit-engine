@@ -73,6 +73,7 @@ async function runAnalyzer(order) {
   }
 
   const websiteUrl = order.website || null;
+  console.log(`[ANALYZER DEBUG] Website URL passed in: ${websiteUrl || 'NONE'}`);
   const insights = extractInsights(scrapedData);
 
   const prompt = `You are a Facebook business page audit analyzer.
@@ -200,6 +201,7 @@ SCRAPED INSIGHTS: ${JSON.stringify(insights)}`;
         } catch (err) {
           fetchResult = `Failed to fetch: ${err.message}`;
         }
+        console.log(`[ANALYZER DEBUG] Tool call: ${toolUseBlock.input?.query} — fetched ${typeof fetchResult === 'string' ? fetchResult.length : 0} chars`);
         messages.push({ role: 'assistant', content: data.content });
         messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseBlock.id, content: fetchResult }] });
         continue;
@@ -213,12 +215,16 @@ SCRAPED INSIGHTS: ${JSON.stringify(insights)}`;
       const jsonMatch = aiText.match(/\{[\s\S]*\}/);
       analysis = JSON.parse(jsonMatch ? jsonMatch[0] : aiText);
     } catch {
+      console.log(`[ANALYZER DEBUG] JSON parse failed. Raw response: ${aiText.slice(0, 500)}`);
       analysis = null;
     }
+    console.log(`[ANALYZER DEBUG] detected_business_type: ${analysis?.detected_business_type || 'NULL'}`);
+    console.log(`[ANALYZER DEBUG] detected_services: ${analysis?.detected_services || 'NULL'}`);
     break;
   }
 
   if (!analysis) {
+    console.log(`[ANALYZER DEBUG] Using fallback — Claude response could not be parsed`);
     analysis = {
       audit_mode: scraperStatus === 'success' ? 'data' : 'strategy',
       page_name: insights?.pageName || null,

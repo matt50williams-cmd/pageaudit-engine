@@ -18,6 +18,22 @@ async function runWriter(order, analysis, trendInsights = null) {
   const avgLikes = analysis?.verified_metrics?.avg_likes;
   const engagementLevel = analysis?.verified_metrics?.engagement_level;
 
+  // Filter out technical errors from core_problems — never expose these to customers
+  const technicalPatterns = /fail|error|scraper|scrape|parsing|fallback|fetch|timeout|missing.*url|check.*data|not.*attempted/i;
+  const cleanProblems = (analysis?.core_problems || []).filter(p => !technicalPatterns.test(p));
+  const cleanStrengths = (analysis?.strengths || []).filter(p => !technicalPatterns.test(p));
+  const cleanOpportunities = (analysis?.opportunities || []).filter(p => !technicalPatterns.test(p));
+
+  // Derive a real growth blocker from form data if analyzer didn't produce one
+  function deriveGrowthBlocker() {
+    if (cleanProblems.length > 0) return cleanProblems[0];
+    if (postingFrequency === 'Rarely or never') return 'inconsistent posting — Facebook\'s algorithm stops showing your page when you go quiet';
+    if (postingFrequency === 'Weekly') return 'posting too infrequently to stay in your audience\'s feed';
+    if (contentType === 'Text posts') return 'relying on text-only posts which get the lowest reach on Facebook';
+    if (facebookNotFound) return 'low visibility — potential customers can\'t find your page when they search';
+    return 'a lack of strategic focus in your content';
+  }
+
   const section1 = facebookNotFound
     ? `# 1. Your #1 Problem: Nobody Can Find You
 
@@ -45,7 +61,7 @@ ${name}, here's the honest truth about where ${businessName} stands on Facebook 
 
 ${postingFrequency === 'Rarely or never' ? `The biggest issue: you're barely posting. Facebook's algorithm forgets pages that go quiet — and so do your customers in ${city || 'your area'}. ${businessName} needs to exist in people's feeds consistently before any other strategy will work.` : postingFrequency === 'Daily' ? `You're posting daily, which is great for staying visible. But for ${businessName}, the question isn't frequency — it's whether each post is actually driving toward your goal of ${goal || 'growth'}. We found opportunities to make every post work harder.` : `Your current posting schedule of "${postingFrequency}" ${postingFrequency === 'Weekly' ? 'is a start, but' : 'shows effort, but'} ${businessName} needs more strategic consistency to ${goal || 'grow'} in ${city || 'your market'}.`}
 
-The single biggest thing holding ${businessName} back is ${analysis?.core_problems?.[0] || 'a lack of strategic focus in your content'}. Here's exactly what we're going to fix.`;
+The single biggest thing holding ${businessName} back is ${deriveGrowthBlocker()}. Here's exactly what we're going to fix.`;
 
   const prompt = `You are a no-nonsense Facebook growth expert who has helped 1,000+ local businesses fix their pages. You charge $2,000 per consultation. You write like a trusted advisor who tells the truth — not a corporate report generator.
 
@@ -54,7 +70,7 @@ ABSOLUTE RULES — BREAK ANY OF THESE AND THE REPORT IS WORTHLESS:
 2. Every example post, CTA, and script must be written AS IF you are the social media manager for ${businessName}. Use their actual name, city, and business type.
 3. NO FLUFF. Every sentence must contain a specific insight or action for ${businessName}.
 4. NO REPETITION. Say something once, say it well, move on.
-5. NEVER mention scrapers, data collection, missing metrics, or technical issues.
+5. NEVER mention scrapers, data collection, missing metrics, technical issues, API errors, fetch failures, or anything about how we gathered data. If data is limited, work with what you have — never say "we couldn't find" or "our system failed." The customer should never know how this report was generated.
 6. Write in second person — direct, confident, warm. Use "${name}" by name 3-4 times throughout.
 7. Total report length: 5-7 pages. Tight. Punchy. Impactful.
 8. Each section must end with ONE clear next action for ${businessName}.
@@ -79,9 +95,9 @@ ${hasRealData ? `VERIFIED DATA:
 - Avg Likes per Post: ${avgLikes || 'N/A'}
 - Engagement Level: ${engagementLevel || 'N/A'}` : ''}
 
-${analysis?.core_problems?.length ? `KEY PROBLEMS IDENTIFIED: ${analysis.core_problems.join('; ')}` : ''}
-${analysis?.strengths?.length ? `STRENGTHS: ${analysis.strengths.join('; ')}` : ''}
-${analysis?.opportunities?.length ? `OPPORTUNITIES: ${analysis.opportunities.join('; ')}` : ''}
+${cleanProblems.length ? `KEY PROBLEMS IDENTIFIED: ${cleanProblems.join('; ')}` : ''}
+${cleanStrengths.length ? `STRENGTHS: ${cleanStrengths.join('; ')}` : ''}
+${cleanOpportunities.length ? `OPPORTUNITIES: ${cleanOpportunities.join('; ')}` : ''}
 
 ${trendInsights ? `CURRENT TRENDS:\n${trendInsights}` : ''}
 
@@ -153,7 +169,7 @@ ${hasRealData ? `Based on ${avgLikes || 0} avg likes and ${engagementLevel || 'u
 Fix: [One specific tactic to boost ${businessName}'s engagement]
 
 **Findability: __/25**
-${facebookNotFound ? 'Score this 0-5. The page could not be found by our automated search.' : 'Score based on how easily the page was discovered.'}
+${facebookNotFound ? 'Score this 0-5. The page is very hard for customers to find on Facebook.' : 'Score based on how easily customers can find the page on Facebook.'}
 Fix: [Exact step to make ${businessName} easier to find in ${city || 'local'} Facebook search]
 
 **TOTAL VISIBILITY SCORE: __/100**
