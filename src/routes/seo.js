@@ -100,8 +100,8 @@ ${failedReadable || "Nothing — everything looks great!"}
 
 WRITE EXACTLY THESE SECTIONS:
 
-# 1. ${businessName}'s Website Score: ${score}/100
-In 2-3 paragraphs, explain what this score means for ${businessName} in plain English${city ? ` — specifically for customers in ${city} searching on Google` : ""}. Don't say "SEO" — say "how easy it is for customers to find you on Google." Explain that ${passed} things are set up right but ${failed.length} important things are missing. Tell them exactly what that means: "Right now, when someone in ${city || 'your area'} searches for a business like yours, Google doesn't have enough information about ${businessName} to show you near the top."
+# 1. How Easy Is It for Customers to Find You on Google?
+In 2-3 paragraphs, give ${businessName} an honest assessment of where their website stands. ${passed} out of ${total} things are set up correctly, and ${failed.length} important things are missing. Explain what this means in plain English${city ? ` — specifically for customers in ${city} searching on Google` : ""}. Don't say "SEO" or "score" — say "how easy it is for customers to find you on Google." Tell them exactly what the missing items are costing them: "Right now, when someone in ${city || 'your area'} searches for a business like yours, Google doesn't have enough information about ${businessName} to show you near the top."
 
 # 2. What's Missing — And Exactly How to Fix It
 For EACH missing item, write a subsection like this:
