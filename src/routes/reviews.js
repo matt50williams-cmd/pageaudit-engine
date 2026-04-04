@@ -4,35 +4,44 @@ const { requireAuth, optionalAuth } = require('../middleware/auth');
 async function reviewRoutes(fastify) {
   // Submit a review (public — no auth required, uses email from body)
   fastify.post('/api/reviews', async (request, reply) => {
+    console.log('[REVIEWS] POST /api/reviews body:', JSON.stringify(request.body));
     const { audit_id, email, customer_name, business_name, rating, feedback } = request.body || {};
 
-    if (!audit_id || !email || !rating) {
+    const parsedAuditId = parseInt(audit_id);
+    if (!parsedAuditId || isNaN(parsedAuditId) || !email || !rating) {
+      console.log('[REVIEWS] Validation failed:', { audit_id, parsedAuditId, email: !!email, rating });
       return reply.status(400).send({ error: 'audit_id, email, and rating are required' });
     }
-    if (rating < 1 || rating > 5 || !Number.isInteger(rating)) {
+    const parsedRating = parseInt(rating);
+    if (parsedRating < 1 || parsedRating > 5 || isNaN(parsedRating)) {
       return reply.status(400).send({ error: 'rating must be an integer between 1 and 5' });
     }
 
-    // Check if this email already reviewed this audit
-    const existing = await queryOne(
-      'SELECT id FROM reviews WHERE audit_id = $1 AND email = $2',
-      [audit_id, email.toLowerCase().trim()]
-    );
-    if (existing) {
-      // Update existing review
-      const updated = await queryOne(
-        'UPDATE reviews SET rating = $1, feedback = $2, customer_name = $3, business_name = $4 WHERE id = $5 RETURNING *',
-        [rating, feedback || null, customer_name || null, business_name || null, existing.id]
+    try {
+      // Check if this email already reviewed this audit
+      const existing = await queryOne(
+        'SELECT id FROM reviews WHERE audit_id = $1 AND email = $2',
+        [parsedAuditId, email.toLowerCase().trim()]
       );
-      return reply.send({ success: true, review: updated, updated: true });
+      if (existing) {
+        const updated = await queryOne(
+          'UPDATE reviews SET rating = $1, feedback = $2, customer_name = $3, business_name = $4 WHERE id = $5 RETURNING *',
+          [parsedRating, feedback || null, customer_name || null, business_name || null, existing.id]
+        );
+        console.log('[REVIEWS] Updated existing review:', updated?.id);
+        return reply.send({ success: true, review: updated, updated: true });
+      }
+
+      const review = await queryOne(
+        'INSERT INTO reviews (audit_id, email, customer_name, business_name, rating, feedback) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+        [parsedAuditId, email.toLowerCase().trim(), customer_name || null, business_name || null, parsedRating, feedback || null]
+      );
+      console.log('[REVIEWS] Created new review:', review?.id);
+      return reply.send({ success: true, review });
+    } catch (err) {
+      console.error('[REVIEWS] DB error:', err.message);
+      return reply.status(500).send({ error: 'Failed to save review. Please try again.' });
     }
-
-    const review = await queryOne(
-      'INSERT INTO reviews (audit_id, email, customer_name, business_name, rating, feedback) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [audit_id, email.toLowerCase().trim(), customer_name || null, business_name || null, rating, feedback || null]
-    );
-
-    return reply.send({ success: true, review });
   });
 
   // Get review for a specific audit (public — by audit_id and email)
