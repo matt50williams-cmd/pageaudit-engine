@@ -22,9 +22,17 @@ CREATE TABLE IF NOT EXISTS funnel_events (
   facebook_url TEXT, utm_source TEXT, utm_campaign TEXT, utm_adset TEXT, utm_ad TEXT,
   metadata JSONB, created_at TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE TABLE IF NOT EXISTS reviews (
+  id SERIAL PRIMARY KEY, audit_id INTEGER REFERENCES audits(id) ON DELETE CASCADE,
+  email TEXT NOT NULL, customer_name TEXT, business_name TEXT,
+  rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  feedback TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
+);
 CREATE INDEX IF NOT EXISTS idx_audits_email ON audits(email);
 CREATE INDEX IF NOT EXISTS idx_audits_status ON audits(status);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_reviews_email ON reviews(email);
+CREATE INDEX IF NOT EXISTS idx_reviews_audit_id ON reviews(audit_id);
 `;
 
 async function migrate() {
