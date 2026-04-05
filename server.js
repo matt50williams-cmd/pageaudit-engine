@@ -14,6 +14,7 @@ const reviewRoutes = require("./src/routes/reviews");
 const repRoutes = require("./src/routes/reps");
 const scanRoutes = require("./src/routes/scan");
 const serviceRoutes = require("./src/routes/services");
+const partnerRoutes = require("./src/routes/partners");
 
 // Optional route: only load if the file exists in your project
 let facebookRoutes = null;
@@ -69,6 +70,7 @@ async function registerRoutes() {
   app.register(repRoutes);
   app.register(scanRoutes);
   app.register(serviceRoutes);
+  app.register(partnerRoutes);
 
   if (facebookRoutes) {
     app.register(facebookRoutes);

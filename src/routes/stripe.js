@@ -200,6 +200,21 @@ async function stripeRoutes(fastify) {
                    audit?.business_name || null, product, amountPaid, parseFloat(rep.commission_audit) || 60, 'pending', 'customer_paid', 'buffering']
                 );
                 console.log(`[REP] Commission created for rep ${repCode}: $${rep.commission_audit} on audit ${auditId}`);
+
+                // Create partner override if rep has a partner
+                if (rep.partner_id) {
+                  try {
+                    const partner = await queryOne('SELECT id, override_audit FROM partner_accounts WHERE id = $1 AND status = $2', [rep.partner_id, 'active']);
+                    if (partner) {
+                      await queryOne(
+                        `INSERT INTO partner_commissions (partner_id, rep_id, customer_email, transaction_type, plan_type, amount_charged, override_amount, buffer_start_date, buffer_release_date, buffer_status)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW() + INTERVAL '7 days', 'buffering')`,
+                        [partner.id, rep.id, audit?.email || session.customer_email, product, product, amountPaid, parseFloat(partner.override_audit) || 10]
+                      );
+                      console.log(`[PARTNER] Override $${partner.override_audit} for partner ${partner.id} from rep ${repCode}`);
+                    }
+                  } catch (pe) { console.error('[PARTNER] Override creation failed:', pe.message); }
+                }
               }
             } catch (err) { console.error('[REP] Commission creation failed:', err.message); }
           }

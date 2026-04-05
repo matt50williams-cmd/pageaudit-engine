@@ -107,6 +107,103 @@ CREATE TABLE IF NOT EXISTS rep_payouts (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE reps ADD COLUMN IF NOT EXISTS partner_id INTEGER;
+
+CREATE TABLE IF NOT EXISTS partner_accounts (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id),
+  full_name VARCHAR(255) NOT NULL,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  phone VARCHAR(20),
+  business_name VARCHAR(255),
+  business_ein VARCHAR(20),
+  city VARCHAR(100),
+  state VARCHAR(50),
+  partner_code VARCHAR(10) UNIQUE NOT NULL,
+  partner_agreement_signed BOOLEAN DEFAULT FALSE,
+  partner_agreement_signed_at TIMESTAMPTZ,
+  partner_agreement_ip VARCHAR(50),
+  partner_agreement_name VARCHAR(255),
+  noncompete_acknowledged BOOLEAN DEFAULT FALSE,
+  equipment_agreement_signed BOOLEAN DEFAULT FALSE,
+  platform_license_fee DECIMAL(10,2) DEFAULT 299.00,
+  promotional_period_ends DATE,
+  override_audit DECIMAL(10,2) DEFAULT 10.00,
+  override_monthly_monitor DECIMAL(10,2) DEFAULT 5.00,
+  override_pro_monitor DECIMAL(10,2) DEFAULT 8.00,
+  override_pro_plus DECIMAL(10,2) DEFAULT 12.00,
+  override_website DECIMAL(10,2) DEFAULT 150.00,
+  override_seo DECIMAL(10,2) DEFAULT 50.00,
+  total_consultants INTEGER DEFAULT 0,
+  active_consultants INTEGER DEFAULT 0,
+  total_clients INTEGER DEFAULT 0,
+  total_earned_ytd DECIMAL(10,2) DEFAULT 0,
+  total_paid_lifetime DECIMAL(10,2) DEFAULT 0,
+  territory_cities TEXT[],
+  territory_zips TEXT[],
+  status VARCHAR(20) DEFAULT 'pending',
+  approved_at TIMESTAMPTZ,
+  approved_by INTEGER,
+  suspension_reason TEXT,
+  w9_submitted BOOLEAN DEFAULT FALSE,
+  annual_earnings_ytd DECIMAL(10,2) DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS partner_payouts (
+  id SERIAL PRIMARY KEY,
+  partner_id INTEGER REFERENCES partner_accounts(id),
+  week_start_date DATE,
+  week_end_date DATE,
+  gross_amount DECIMAL(10,2),
+  license_fee_deduction DECIMAL(10,2) DEFAULT 0,
+  clawback_deductions DECIMAL(10,2) DEFAULT 0,
+  final_payout_amount DECIMAL(10,2),
+  audit_override_count INTEGER DEFAULT 0,
+  monthly_override_count INTEGER DEFAULT 0,
+  status VARCHAR(30) DEFAULT 'pending_approval',
+  approved_at TIMESTAMPTZ,
+  approved_by INTEGER,
+  paid_at TIMESTAMPTZ,
+  payment_method VARCHAR(50),
+  payment_reference VARCHAR(255),
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS partner_commissions (
+  id SERIAL PRIMARY KEY,
+  partner_id INTEGER REFERENCES partner_accounts(id),
+  rep_id INTEGER,
+  customer_email TEXT,
+  transaction_type VARCHAR(50),
+  plan_type VARCHAR(50),
+  amount_charged DECIMAL(10,2),
+  override_amount DECIMAL(10,2),
+  buffer_start_date TIMESTAMPTZ,
+  buffer_release_date TIMESTAMPTZ,
+  buffer_status VARCHAR(20) DEFAULT 'buffering',
+  payment_status VARCHAR(30) DEFAULT 'customer_paid',
+  status VARCHAR(20) DEFAULT 'pending',
+  payout_id INTEGER REFERENCES partner_payouts(id),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS partner_alerts (
+  id SERIAL PRIMARY KEY,
+  partner_id INTEGER REFERENCES partner_accounts(id),
+  alert_type VARCHAR(50),
+  message TEXT,
+  is_read BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_partner_code ON partner_accounts(partner_code);
+CREATE INDEX IF NOT EXISTS idx_partner_commissions_partner ON partner_commissions(partner_id);
+CREATE INDEX IF NOT EXISTS idx_partner_payouts_partner ON partner_payouts(partner_id);
+CREATE INDEX IF NOT EXISTS idx_reps_partner_id ON reps(partner_id);
+
 CREATE TABLE IF NOT EXISTS rep_business_records (
   id SERIAL PRIMARY KEY,
   rep_id INTEGER,
