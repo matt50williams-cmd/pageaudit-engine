@@ -222,6 +222,16 @@ async function auditRoutes(fastify) {
     }
   });
 
+  fastify.get("/api/audits/:id/status", async (request, reply) => {
+    try {
+      const audit = await queryOne("SELECT id, paid, status FROM audits WHERE id = $1", [request.params.id]);
+      if (!audit) return reply.status(404).send({ error: "Audit not found" });
+      return reply.send({ id: audit.id, paid: audit.paid, status: audit.status });
+    } catch (err) {
+      return reply.status(500).send({ error: "Failed" });
+    }
+  });
+
   fastify.get("/api/audits", { preHandler: requireAuth }, async (request, reply) => {
     try {
       const audits = await queryAll(
