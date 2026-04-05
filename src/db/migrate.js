@@ -107,6 +107,48 @@ CREATE TABLE IF NOT EXISTS rep_payouts (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS rep_visits (
+  id SERIAL PRIMARY KEY,
+  rep_id INTEGER,
+  rep_code VARCHAR(20),
+  business_name VARCHAR(255),
+  owner_name VARCHAR(255),
+  phone VARCHAR(50),
+  address TEXT,
+  industry VARCHAR(100),
+  outcome VARCHAR(30) CHECK (outcome IN ('closed','follow_up','demo_shown','not_interested','not_available')),
+  notes TEXT,
+  follow_up_date DATE,
+  follow_up_done BOOLEAN DEFAULT FALSE,
+  rep_link_sent BOOLEAN DEFAULT FALSE,
+  lat DECIMAL,
+  lng DECIMAL,
+  visited_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS rep_daily_stats (
+  id SERIAL PRIMARY KEY,
+  rep_id INTEGER,
+  rep_code VARCHAR(20),
+  date DATE NOT NULL,
+  visits_count INTEGER DEFAULT 0,
+  closes_count INTEGER DEFAULT 0,
+  demos_count INTEGER DEFAULT 0,
+  follow_ups_count INTEGER DEFAULT 0,
+  not_interested_count INTEGER DEFAULT 0,
+  earnings DECIMAL DEFAULT 0,
+  streak_day INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(rep_id, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rep_visits_rep_id ON rep_visits(rep_id);
+CREATE INDEX IF NOT EXISTS idx_rep_visits_date ON rep_visits(visited_at);
+CREATE INDEX IF NOT EXISTS idx_rep_visits_outcome ON rep_visits(outcome);
+CREATE INDEX IF NOT EXISTS idx_rep_daily_stats_rep_id ON rep_daily_stats(rep_id);
+CREATE INDEX IF NOT EXISTS idx_rep_daily_stats_date ON rep_daily_stats(date);
+
 CREATE TABLE IF NOT EXISTS scan_results (
   id SERIAL PRIMARY KEY,
   audit_id INTEGER REFERENCES audits(id) ON DELETE CASCADE,

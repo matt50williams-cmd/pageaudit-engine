@@ -1,7 +1,136 @@
+const axios = require('axios');
 const { queryOne, queryAll } = require('../db');
 const { requireAuth } = require('../middleware/auth');
 
 async function repRoutes(fastify) {
+
+  // ── REP: LOG A VISIT ──
+  fastify.post('/api/reps/visits', { preHandler: requireAuth }, async (request, reply) => {
+    const rep = await queryOne('SELECT id, rep_code FROM reps WHERE email = $1', [request.user.email]);
+    if (!rep) return reply.status(403).send({ error: 'Not a registered rep' });
+    const { business_name, owner_name, phone, address, industry, outcome, notes, follow_up_date, rep_link_sent, lat, lng, scan_score } = request.body || {};
+    if (!business_name || !outcome) return reply.status(400).send({ error: 'business_name and outcome required' });
+
+    const visit = await queryOne(
+      `INSERT INTO rep_visits (rep_id, rep_code, business_name, owner_name, phone, address, industry, outcome, notes, follow_up_date, rep_link_sent, lat, lng)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+      [rep.id, rep.rep_code, business_name, owner_name || null, phone || null, address || null, industry || null, outcome, notes || null, follow_up_date || null, rep_link_sent || false, lat || null, lng || null]
+    );
+
+    // Update daily stats
+    const todayDate = new Date().toISOString().split('T')[0];
+    const isClose = outcome === 'closed';
+    const isDemo = outcome === 'demo_shown';
+    const isFollowUp = outcome === 'follow_up';
+    const isNotInterested = outcome === 'not_interested';
+    await queryOne(
+      `INSERT INTO rep_daily_stats (rep_id, rep_code, date, visits_count, closes_count, demos_count, follow_ups_count, not_interested_count, earnings)
+       VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8)
+       ON CONFLICT (rep_id, date) DO UPDATE SET
+         visits_count = rep_daily_stats.visits_count + 1,
+         closes_count = rep_daily_stats.closes_count + $4,
+         demos_count = rep_daily_stats.demos_count + $5,
+         follow_ups_count = rep_daily_stats.follow_ups_count + $6,
+         not_interested_count = rep_daily_stats.not_interested_count + $7,
+         earnings = rep_daily_stats.earnings + $8`,
+      [rep.id, rep.rep_code, todayDate, isClose ? 1 : 0, isDemo ? 1 : 0, isFollowUp ? 1 : 0, isNotInterested ? 1 : 0, isClose ? 60 : 0]
+    );
+
+    return reply.send({ success: true, visit_id: visit.id });
+  });
+
+  // ── REP: GET MY VISITS ──
+  fastify.get('/api/reps/visits', { preHandler: requireAuth }, async (request, reply) => {
+    const rep = await queryOne('SELECT id FROM reps WHERE email = $1', [request.user.email]);
+    if (!rep) return reply.status(403).send({ error: 'Not a registered rep' });
+    const { date, outcome, limit } = request.query;
+    let where = 'WHERE rep_id = $1';
+    const params = [rep.id];
+    let idx = 2;
+    if (date) { where += ` AND DATE(visited_at) = $${idx}`; params.push(date); idx++; }
+    if (outcome) { where += ` AND outcome = $${idx}`; params.push(outcome); idx++; }
+    const visits = await queryAll(`SELECT * FROM rep_visits ${where} ORDER BY visited_at DESC LIMIT ${parseInt(limit) || 100}`, params);
+    return reply.send({ visits });
+  });
+
+  // ── REP: GET MY STATS ──
+  fastify.get('/api/reps/stats', { preHandler: requireAuth }, async (request, reply) => {
+    const rep = await queryOne('SELECT id FROM reps WHERE email = $1', [request.user.email]);
+    if (!rep) return reply.status(403).send({ error: 'Not a registered rep' });
+    const todayDate = new Date().toISOString().split('T')[0];
+    const todayStats = await queryOne('SELECT * FROM rep_daily_stats WHERE rep_id = $1 AND date = $2', [rep.id, todayDate]) || { visits_count: 0, closes_count: 0, demos_count: 0, follow_ups_count: 0, earnings: 0 };
+    const weekStats = await queryOne(`SELECT COALESCE(SUM(visits_count),0) as visits, COALESCE(SUM(closes_count),0) as closes, COALESCE(SUM(earnings),0) as earnings FROM rep_daily_stats WHERE rep_id = $1 AND date >= CURRENT_DATE - INTERVAL '7 days'`, [rep.id]);
+    const allTime = await queryOne('SELECT COALESCE(SUM(visits_count),0) as visits, COALESCE(SUM(closes_count),0) as closes, COALESCE(SUM(earnings),0) as earnings FROM rep_daily_stats WHERE rep_id = $1', [rep.id]);
+    const streak = await queryAll('SELECT date FROM rep_daily_stats WHERE rep_id = $1 AND visits_count > 0 ORDER BY date DESC LIMIT 30', [rep.id]);
+    let streakCount = 0;
+    const d = new Date(); d.setHours(0, 0, 0, 0);
+    for (const row of streak) {
+      const rd = new Date(row.date + 'T00:00:00'); rd.setHours(0, 0, 0, 0);
+      if (Math.abs(d - rd) <= 86400000) { streakCount++; d.setDate(d.getDate() - 1); } else break;
+    }
+    const totalCloses = parseInt(allTime.closes) || 0;
+    const totalVisits = parseInt(allTime.visits) || 0;
+    return reply.send({
+      today: { visits: parseInt(todayStats.visits_count), closes: parseInt(todayStats.closes_count), demos: parseInt(todayStats.demos_count), follow_ups: parseInt(todayStats.follow_ups_count), earnings: parseFloat(todayStats.earnings) },
+      this_week: { visits: parseInt(weekStats.visits), closes: parseInt(weekStats.closes), earnings: parseFloat(weekStats.earnings) },
+      all_time: { visits: totalVisits, closes: totalCloses, earnings: parseFloat(allTime.earnings), close_rate: totalVisits > 0 ? Math.round((totalCloses / totalVisits) * 100) : 0 },
+      streak: streakCount,
+      total_closes: totalCloses,
+    });
+  });
+
+  // ── REP: MORNING STATS ──
+  fastify.get('/api/reps/morning-stats', { preHandler: requireAuth }, async (request, reply) => {
+    const rep = await queryOne('SELECT id FROM reps WHERE email = $1', [request.user.email]);
+    if (!rep) return reply.status(403).send({ error: 'Not a registered rep' });
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+    const yd = yesterday.toISOString().split('T')[0];
+    const yStats = await queryOne('SELECT * FROM rep_daily_stats WHERE rep_id = $1 AND date = $2', [rep.id, yd]);
+    const followUps = await queryAll("SELECT * FROM rep_visits WHERE rep_id = $1 AND outcome = 'follow_up' AND follow_up_done = FALSE AND follow_up_date <= CURRENT_DATE ORDER BY follow_up_date ASC", [rep.id]);
+    return reply.send({
+      yesterday: yStats ? { visits: parseInt(yStats.visits_count), closes: parseInt(yStats.closes_count), earnings: parseFloat(yStats.earnings) } : null,
+      follow_ups_due: followUps.length,
+      follow_ups: followUps.slice(0, 10),
+    });
+  });
+
+  // ── PUBLIC: LEADERBOARD ──
+  fastify.get('/api/reps/leaderboard', async (request, reply) => {
+    const todayDate = new Date().toISOString().split('T')[0];
+    const leaders = await queryAll(
+      `SELECT r.full_name as name, r.rep_code, ds.visits_count as visits_today, ds.closes_count as closes_today, ds.earnings as earnings_today
+       FROM rep_daily_stats ds JOIN reps r ON ds.rep_id = r.id
+       WHERE ds.date = $1 ORDER BY ds.closes_count DESC, ds.visits_count DESC LIMIT 10`,
+      [todayDate]
+    );
+    return reply.send({ leaderboard: leaders });
+  });
+
+  // ── ADMIN: REPS OVERVIEW ──
+  fastify.get('/api/admin/reps/overview', { preHandler: requireAuth }, async (request, reply) => {
+    if (request.user.role !== 'admin') return reply.status(403).send({ error: 'Admin access required' });
+    const todayDate = new Date().toISOString().split('T')[0];
+    const reps = await queryAll(`
+      SELECT r.id, r.full_name as name, r.rep_code, r.status, r.created_at,
+        COALESCE(td.visits_count, 0) as today_visits, COALESCE(td.closes_count, 0) as today_closes, COALESCE(td.earnings, 0) as today_earnings,
+        COALESCE(wk.visits, 0) as week_visits, COALESCE(wk.closes, 0) as week_closes, COALESCE(wk.earnings, 0) as week_earnings,
+        COALESCE(at.visits, 0) as all_time_visits, COALESCE(at.closes, 0) as all_time_closes, COALESCE(at.earnings, 0) as all_time_earnings
+      FROM reps r
+      LEFT JOIN rep_daily_stats td ON td.rep_id = r.id AND td.date = $1
+      LEFT JOIN LATERAL (SELECT SUM(visits_count) as visits, SUM(closes_count) as closes, SUM(earnings) as earnings FROM rep_daily_stats WHERE rep_id = r.id AND date >= CURRENT_DATE - INTERVAL '7 days') wk ON true
+      LEFT JOIN LATERAL (SELECT SUM(visits_count) as visits, SUM(closes_count) as closes, SUM(earnings) as earnings FROM rep_daily_stats WHERE rep_id = r.id) at ON true
+      ORDER BY td.closes_count DESC NULLS LAST, r.full_name ASC
+    `, [todayDate]);
+    return reply.send(reps);
+  });
+
+  // ── ADMIN: REP ACTIVITY ──
+  fastify.get('/api/admin/reps/:repId/activity', { preHandler: requireAuth }, async (request, reply) => {
+    if (request.user.role !== 'admin') return reply.status(403).send({ error: 'Admin access required' });
+    const visits = await queryAll('SELECT * FROM rep_visits WHERE rep_id = $1 ORDER BY visited_at DESC LIMIT 50', [request.params.repId]);
+    const daily = await queryAll('SELECT * FROM rep_daily_stats WHERE rep_id = $1 ORDER BY date DESC LIMIT 30', [request.params.repId]);
+    return reply.send({ visits, daily_stats: daily });
+  });
 
   // ── REP DASHBOARD DATA (rep must be logged in) ──
   fastify.get('/api/rep/dashboard', { preHandler: requireAuth }, async (request, reply) => {

@@ -1,4 +1,6 @@
+const axios = require('axios');
 const { queryOne } = require('../db');
+const { requireAuth } = require('../middleware/auth');
 const { runFullScan, runTeaserScan } = require('../services/scanEngine');
 
 // Simple in-memory rate limiter for teaser scans
@@ -151,6 +153,42 @@ async function scanRoutes(fastify) {
     const scanResult = await queryOne('SELECT raw_data FROM scan_results WHERE audit_id = $1 ORDER BY id DESC LIMIT 1', [auditId]);
     if (!scanResult) return reply.status(404).send({ error: 'No scan result found' });
     return reply.send(JSON.parse(scanResult.raw_data));
+  });
+
+  // ── NEARBY BUSINESSES (for rep geo lookup) ──
+  fastify.get('/api/scan/nearby', async (request, reply) => {
+    const { lat, lng } = request.query;
+    if (!lat || !lng) return reply.status(400).send({ error: 'lat and lng required' });
+    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+    if (!apiKey) return reply.status(500).send({ error: 'Google API not configured' });
+    try {
+      const res = await axios.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', {
+        params: { location: `${lat},${lng}`, radius: 150, type: 'establishment', key: apiKey },
+        timeout: 8000,
+      });
+      const skipTypes = ['transit_station', 'bus_station', 'train_station', 'atm', 'parking', 'gas_station', 'fire_station', 'police', 'post_office'];
+      const places = (res.data.results || [])
+        .filter(p => !p.types?.some(t => skipTypes.includes(t)))
+        .slice(0, 10)
+        .map(p => ({ name: p.name, address: p.vicinity, placeId: p.place_id, types: p.types, rating: p.rating || null }));
+      return reply.send({ places });
+    } catch (err) {
+      console.error('[SCAN] Nearby search failed:', err.message);
+      return reply.status(500).send({ error: 'Nearby search failed' });
+    }
+  });
+
+  // ── REP PRE-SCAN (no rate limit, auth required) ──
+  fastify.post('/api/scan/prescan', { preHandler: requireAuth }, async (request, reply) => {
+    const { businessName, city, state } = request.body || {};
+    if (!businessName) return reply.status(400).send({ error: 'businessName required' });
+    try {
+      const result = await runTeaserScan({ businessName, city: city || '', state: state || '' });
+      return reply.send(result);
+    } catch (err) {
+      console.error('[SCAN] Pre-scan failed:', err.message);
+      return reply.status(500).send({ error: 'Pre-scan failed' });
+    }
   });
 }
 
