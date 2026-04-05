@@ -15,7 +15,7 @@ function getFrontendUrl() {
 async function stripeRoutes(fastify) {
   fastify.post("/api/stripe/checkout", async (request, reply) => {
     try {
-      const { audit_id, email, customer_name } = request.body || {};
+      const { audit_id, email, customer_name, rep_code } = request.body || {};
 
       if (!audit_id || !email) {
         return reply.status(400).send({ error: "audit_id and email are required" });
@@ -35,12 +35,14 @@ async function stripeRoutes(fastify) {
           audit_id: String(audit_id),
           customer_name: customer_name || "",
           product: "one_time_audit",
+          rep_code: rep_code || "",
         },
         payment_intent_data: {
           metadata: {
             audit_id: String(audit_id),
             customer_name: customer_name || "",
             product: "one_time_audit",
+            rep_code: rep_code || "",
           },
         },
         line_items: [
@@ -60,14 +62,12 @@ async function stripeRoutes(fastify) {
         cancel_url: `${frontendUrl}/audit-preview?cancelled=true`,
       });
 
-      await queryOne(
-        `
-        UPDATE audits
-        SET stripe_session_id = $1, updated_at = NOW()
-        WHERE id = $2
-        `,
-        [session.id, audit_id]
-      );
+      // Store stripe session and rep code on audit
+      if (rep_code) {
+        await queryOne('UPDATE audits SET stripe_session_id = $1, rep_code = $2, updated_at = NOW() WHERE id = $3', [session.id, rep_code, audit_id]);
+      } else {
+        await queryOne('UPDATE audits SET stripe_session_id = $1, updated_at = NOW() WHERE id = $2', [session.id, audit_id]);
+      }
 
       await queryOne(
         `
@@ -173,34 +173,36 @@ async function stripeRoutes(fastify) {
         const product = session.metadata?.product;
         const amountPaid = typeof session.amount_total === "number" ? session.amount_total / 100 : null;
 
+        const repCode = session.metadata?.rep_code || null;
+
         if ((product === "one_time_audit" || product === "seo_audit") && auditId) {
           await queryOne(
-            `
-            UPDATE audits
-            SET paid = TRUE,
-                amount_paid = $1,
-                updated_at = NOW()
-            WHERE id = $2
-            `,
-            [amountPaid, auditId]
+            `UPDATE audits SET paid = TRUE, amount_paid = $1, rep_code = $2, updated_at = NOW() WHERE id = $3`,
+            [amountPaid, repCode || null, auditId]
           );
 
           await queryOne(
-            `
-            INSERT INTO funnel_events (event_type, email, report_id, metadata)
-            VALUES ($1, $2, $3, $4)
-            `,
-            [
-              "payment_success",
-              session.customer_email,
-              auditId,
-              JSON.stringify({
-                amount: amountPaid,
-                stripe_session_id: session.id,
-                payment_status: session.payment_status,
-              }),
-            ]
+            `INSERT INTO funnel_events (event_type, email, report_id, metadata) VALUES ($1, $2, $3, $4)`,
+            ["payment_success", session.customer_email, auditId,
+              JSON.stringify({ amount: amountPaid, stripe_session_id: session.id, payment_status: session.payment_status, rep_code: repCode })]
           ).catch(() => null);
+
+          // Create rep commission if rep_code exists
+          if (repCode) {
+            try {
+              const rep = await queryOne('SELECT id, commission_audit FROM reps WHERE rep_code = $1 AND status = $2', [repCode, 'active']);
+              if (rep) {
+                const audit = await queryOne('SELECT customer_name, business_name, email FROM audits WHERE id = $1', [auditId]);
+                await queryOne(
+                  `INSERT INTO rep_commissions (rep_id, audit_id, customer_email, customer_name, business_name, product_type, sale_amount, commission_amount, status, payment_status, buffer_release_date, buffer_status)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW() + INTERVAL '7 days', $11)`,
+                  [rep.id, auditId, audit?.email || session.customer_email, audit?.customer_name || session.metadata?.customer_name || null,
+                   audit?.business_name || null, product, amountPaid, parseFloat(rep.commission_audit) || 60, 'pending', 'customer_paid', 'buffering']
+                );
+                console.log(`[REP] Commission created for rep ${repCode}: $${rep.commission_audit} on audit ${auditId}`);
+              }
+            } catch (err) { console.error('[REP] Commission creation failed:', err.message); }
+          }
 
           if (product === "seo_audit") {
             const audit = await queryOne("SELECT website, email, customer_name, business_name, city FROM audits WHERE id = $1", [auditId]);

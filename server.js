@@ -11,6 +11,7 @@ const proxyRoutes = require("./src/routes/proxy");
 const websiteRoutes = require("./src/routes/website");
 const seoRoutes = require("./src/routes/seo");
 const reviewRoutes = require("./src/routes/reviews");
+const repRoutes = require("./src/routes/reps");
 
 // Optional route: only load if the file exists in your project
 let facebookRoutes = null;
@@ -63,6 +64,7 @@ async function registerRoutes() {
   app.register(websiteRoutes);
   app.register(seoRoutes);
   app.register(reviewRoutes);
+  app.register(repRoutes);
 
   if (facebookRoutes) {
     app.register(facebookRoutes);
