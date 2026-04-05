@@ -107,6 +107,40 @@ CREATE TABLE IF NOT EXISTS rep_payouts (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS scan_results (
+  id SERIAL PRIMARY KEY,
+  audit_id INTEGER REFERENCES audits(id) ON DELETE CASCADE,
+  business_name TEXT,
+  city TEXT,
+  state TEXT,
+  overall_score INTEGER,
+  google_score INTEGER,
+  website_score INTEGER,
+  yelp_score INTEGER,
+  nap_score INTEGER,
+  facebook_score INTEGER,
+  raw_data JSONB,
+  ai_insights JSONB,
+  confidence VARCHAR(10),
+  scanned_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS scan_findings (
+  id SERIAL PRIMARY KEY,
+  scan_result_id INTEGER REFERENCES scan_results(id) ON DELETE CASCADE,
+  platform VARCHAR(50),
+  severity VARCHAR(20),
+  title VARCHAR(255),
+  description TEXT,
+  impact TEXT,
+  fix TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_scan_results_audit_id ON scan_results(audit_id);
+CREATE INDEX IF NOT EXISTS idx_scan_findings_scan_result_id ON scan_findings(scan_result_id);
+
 CREATE INDEX IF NOT EXISTS idx_rep_payouts_rep_id ON rep_payouts(rep_id);
 CREATE INDEX IF NOT EXISTS idx_rep_payouts_status ON rep_payouts(status);
 
