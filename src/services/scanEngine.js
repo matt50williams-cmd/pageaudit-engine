@@ -40,7 +40,7 @@ async function checkGoogle(businessName, city, state) {
   // Score
   let score = 0;
   score += 20; // has listing
-  if (rating >= 4.5) score += 25; else if (rating >= 4.0) score += 20; else if (rating >= 3.0) score += 10;
+  if (rating >= 4.7) score += 25; else if (rating >= 4.5) score += 20; else if (rating >= 4.0) score += 12; else if (rating >= 3.5) score += 5;
   if (reviewCount >= 50) score += 20; else if (reviewCount >= 20) score += 15; else if (reviewCount >= 5) score += 10; else score += 5;
   if (hasHours) score += 10;
   if (hasPhotos) score += 10;
@@ -53,9 +53,11 @@ async function checkGoogle(businessName, city, state) {
   const f = (severity, title, description, impact, fix) => findings.push({ platform: 'Google', severity, title, description, impact, fix });
 
   if (rating === 0) f('critical', 'No Google rating', 'Your Google Business Profile has no rating yet.', 'Businesses without ratings get significantly less clicks from search results.', 'Ask your last 10 customers to leave a Google review. Send them a direct link to your review page.');
-  else if (rating < 4.0) f('critical', `Google rating is ${rating} stars`, `Your Google rating of ${rating} is below the 4.0 threshold customers use to filter businesses.`, 'Most customers filter Google results by 4+ stars. You are being filtered out of search results.', 'Respond to every negative review professionally. Ask satisfied customers for reviews to bring your average up.');
-  else if (rating >= 4.5) f('good', `Excellent ${rating}-star rating`, `Your ${rating}-star rating on Google is excellent and builds strong trust with potential customers.`, '', '');
-  else f('good', `Solid ${rating}-star rating`, `Your ${rating}-star Google rating is competitive.`, '', 'Keep asking happy customers for reviews to push toward 4.5+.');
+  else if (rating < 3.5) f('critical', `Your ${rating}-star rating is seriously hurting your business`, `A ${rating}-star rating on Google drives customers away before they even consider you. Most people won't click on a business under 3.5 stars.`, 'This is likely costing you significant revenue every month.', 'This requires an urgent review strategy. Respond professionally to every negative review. Focus on delivering exceptional service and ask every satisfied customer for a review this week.');
+  else if (rating < 4.0) f('critical', `Your ${rating}-star rating is hurting you`, `Your ${rating}-star Google rating is below the 4.0 threshold. Customers filter by 4+ stars — you are being filtered out of results.`, 'Businesses below 4.0 stars lose up to 40% of potential customers.', 'Focus on getting more 5-star reviews to bring your average up. Ask every happy customer directly after a positive experience. Respond to every existing review professionally.');
+  else if (rating < 4.5) f('warning', `Your ${rating}-star rating is average`, `Your ${rating}-star rating is below the 4.5 threshold that top-ranking businesses maintain. Customers searching Google often sort by rating — businesses with 4.5+ appear more trustworthy and get more clicks.`, 'Businesses with 4.5+ ratings get significantly more clicks and calls than those with 4.0-4.4 ratings.', 'Focus on getting more 5-star reviews to bring your average up. Ask every happy customer directly after a positive experience. Respond to every existing review professionally.');
+  else if (rating < 4.7) f('good', `Strong ${rating}-star rating — keep it up`, `Your ${rating}-star Google rating is strong and builds good trust with potential customers.`, '', 'Keep asking happy customers for reviews to push toward 4.7+.');
+  else f('good', `Excellent ${rating}-star rating`, `Your ${rating}-star rating on Google is excellent and builds strong trust with potential customers.`, '', '');
 
   if (reviewCount < 5) f('critical', `Only ${reviewCount} Google reviews`, `With only ${reviewCount} reviews, your business appears unestablished to potential customers.`, 'Businesses with fewer than 5 reviews are often skipped by customers who see them as untrustworthy.', 'Start a review campaign. Ask every customer this week to leave a Google review. Aim for 20+ reviews within 30 days.');
   else if (reviewCount < 20) f('warning', `${reviewCount} Google reviews — need more`, `You have ${reviewCount} reviews. Most competitive businesses in your area have 30+.`, 'More reviews improve your ranking in Google Maps and build customer trust.', 'Send a follow-up text or email after every job asking for a review. Include a direct link.');
@@ -228,9 +230,8 @@ function calculateOverallScore(platforms) {
 function getScoreLabel(score) {
   if (score >= 85) return 'Excellent';
   if (score >= 70) return 'Good';
-  if (score >= 55) return 'Average';
-  if (score >= 40) return 'Needs Work';
-  return 'Poor';
+  if (score >= 50) return 'Needs Improvement';
+  return 'Critical';
 }
 
 // ─── 6. AI INSIGHTS ───
