@@ -58,7 +58,7 @@ async function stripeRoutes(fastify) {
             quantity: 1,
           },
         ],
-        success_url: `${frontendUrl}/create-account?session_id={CHECKOUT_SESSION_ID}&audit_id=${audit_id}`,
+        success_url: `${frontendUrl}/post-payment-details?session_id={CHECKOUT_SESSION_ID}&audit_id=${audit_id}`,
         cancel_url: `${frontendUrl}/audit-preview?cancelled=true`,
       });
 
