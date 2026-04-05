@@ -234,13 +234,18 @@ function getScoreLabel(score) {
 }
 
 // ─── 6. AI INSIGHTS ───
-async function generateInsights(businessName, city, state, platforms, overallScore) {
+async function generateInsights(businessName, city, state, platforms, overallScore, extra = {}) {
   if (!process.env.ANTHROPIC_API_KEY) return { summary: '', topPriorities: [], industryContext: '', monthlyGoal: '' };
 
   const prompt = `You are analyzing the online presence of a local business.
 
 Business: ${businessName}
 Location: ${city}, ${state}
+${extra.industry ? `Industry: ${extra.industry}` : ''}
+${extra.yearsInBusiness ? `Years in business: ${extra.yearsInBusiness}` : ''}
+${extra.biggestChallenge ? `Biggest challenge: ${extra.biggestChallenge}` : ''}
+${extra.phone ? `Known phone: ${extra.phone}` : ''}
+${extra.address ? `Known address: ${extra.address}` : ''}
 
 Scan data:
 Google Score: ${platforms.google?.score ?? 'N/A'}/100
@@ -257,6 +262,9 @@ NAP Consistency: ${platforms.nap?.score ?? 'N/A'}/100
 
 Overall Score: ${overallScore}/100
 
+${extra.biggestChallenge ? `The business owner said their biggest challenge is: "${extra.biggestChallenge}". Make sure your top priority directly addresses this.` : ''}
+${extra.industry ? `Tailor your recommendations specifically for ${extra.industry} businesses.` : ''}
+
 Generate a JSON response with this exact structure:
 {
   "summary": "2-3 sentence plain English summary of their online presence. Be specific and honest.",
@@ -265,7 +273,7 @@ Generate a JSON response with this exact structure:
     { "priority": 2, "title": "short action title", "description": "specific actionable description", "impact": "high", "effort": "medium" },
     { "priority": 3, "title": "short action title", "description": "specific actionable description", "impact": "medium", "effort": "easy" }
   ],
-  "industryContext": "1 sentence about how this score compares to similar businesses",
+  "industryContext": "1 sentence about how this score compares to similar ${extra.industry || 'local'} businesses",
   "monthlyGoal": "One specific thing they should focus on this month"
 }
 
@@ -290,8 +298,8 @@ Return ONLY valid JSON. No other text.`;
 }
 
 // ─── 7. MAIN SCAN FUNCTION ───
-async function runFullScan({ businessName, city, state, website, facebookUrl }) {
-  console.log(`[SCAN] Starting full scan for: ${businessName}, ${city}, ${state}`);
+async function runFullScan({ businessName, city, state, website, facebookUrl, address, phone, industry, biggestChallenge, yearsInBusiness, googleProfileUrl, yelpUrl }) {
+  console.log(`[SCAN] Starting full scan for: ${businessName}, ${city}, ${state} (${industry || 'unknown industry'})`);
   const startTime = Date.now();
 
   // Google is required — if it fails, stop
@@ -329,7 +337,7 @@ async function runFullScan({ businessName, city, state, website, facebookUrl }) 
   const scoreLabel = getScoreLabel(overallScore);
 
   // Generate AI insights
-  const insights = await generateInsights(businessName, city, state, platforms, overallScore);
+  const insights = await generateInsights(businessName, city, state, platforms, overallScore, { industry, biggestChallenge, yearsInBusiness, phone, address });
 
   // Collect all findings sorted by severity
   const severityOrder = { critical: 0, warning: 1, good: 2 };

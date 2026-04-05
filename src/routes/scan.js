@@ -54,7 +54,7 @@ async function scanRoutes(fastify) {
 
   // ── FULL SCAN (requires paid audit) ──
   fastify.post('/api/scan/full', async (request, reply) => {
-    const { businessName, city, state, website, facebookUrl, auditId } = request.body || {};
+    const { businessName, city, state, website, facebookUrl, auditId, address, phone, industry, biggestChallenge, yearsInBusiness, googleProfileUrl, yelpUrl } = request.body || {};
 
     if (!businessName || !city) {
       return reply.status(400).send({ error: 'businessName and city are required' });
@@ -74,7 +74,7 @@ async function scanRoutes(fastify) {
     await queryOne('UPDATE audits SET status = $1, updated_at = NOW() WHERE id = $2', ['analyzing', auditId]);
 
     try {
-      const result = await runFullScan({ businessName, city, state: state || '', website, facebookUrl });
+      const result = await runFullScan({ businessName, city, state: state || '', website, facebookUrl, address, phone, industry, biggestChallenge, yearsInBusiness, googleProfileUrl, yelpUrl });
 
       if (result.error) {
         await queryOne('UPDATE audits SET status = $1, updated_at = NOW() WHERE id = $2', ['failed', auditId]);
