@@ -214,6 +214,24 @@ CREATE INDEX IF NOT EXISTS idx_rep_visits_outcome ON rep_visits(outcome);
 CREATE INDEX IF NOT EXISTS idx_rep_daily_stats_rep_id ON rep_daily_stats(rep_id);
 CREATE INDEX IF NOT EXISTS idx_rep_daily_stats_date ON rep_daily_stats(date);
 
+CREATE TABLE IF NOT EXISTS service_requests (
+  id SERIAL PRIMARY KEY,
+  audit_id INTEGER,
+  customer_name VARCHAR(255),
+  email VARCHAR(255) NOT NULL,
+  phone VARCHAR(50),
+  service_requested VARCHAR(100) NOT NULL,
+  best_time VARCHAR(100),
+  scan_score INTEGER,
+  rep_id INTEGER,
+  rep_code VARCHAR(20),
+  status VARCHAR(30) DEFAULT 'new' CHECK (status IN ('new','contacted','quoted','closed','lost')),
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_service_requests_status ON service_requests(status);
+
 CREATE TABLE IF NOT EXISTS scan_results (
   id SERIAL PRIMARY KEY,
   audit_id INTEGER REFERENCES audits(id) ON DELETE CASCADE,
