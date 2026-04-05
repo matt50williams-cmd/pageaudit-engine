@@ -107,6 +107,71 @@ CREATE TABLE IF NOT EXISTS rep_payouts (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS rep_business_records (
+  id SERIAL PRIMARY KEY,
+  rep_id INTEGER,
+  rep_code VARCHAR(20),
+  business_name VARCHAR(255),
+  address TEXT,
+  city VARCHAR(100),
+  state VARCHAR(10),
+  phone VARCHAR(50),
+  website VARCHAR(255),
+  industry VARCHAR(100),
+  owner_first_name VARCHAR(100),
+  owner_last_name VARCHAR(100),
+  owner_direct_phone VARCHAR(20),
+  owner_email VARCHAR(255),
+  owner_preferred_contact VARCHAR(50),
+  best_time_to_reach VARCHAR(100),
+  is_decision_maker BOOLEAN DEFAULT TRUE,
+  gatekeeper_name VARCHAR(100),
+  gatekeeper_role VARCHAR(100),
+  google_place_id VARCHAR(100),
+  google_rating DECIMAL(3,1),
+  google_review_count INTEGER,
+  website_url VARCHAR(255),
+  facebook_url VARCHAR(255),
+  yelp_url VARCHAR(255),
+  last_scan_score INTEGER,
+  last_scan_data JSONB,
+  last_scanned_at TIMESTAMPTZ,
+  score_history JSONB DEFAULT '[]',
+  total_consultations INTEGER DEFAULT 0,
+  last_contacted_at TIMESTAMPTZ,
+  contact_attempts INTEGER DEFAULT 0,
+  status VARCHAR(50) DEFAULT 'prospect',
+  pipeline_stage INTEGER DEFAULT 1,
+  interest_level VARCHAR(20),
+  estimated_close_date DATE,
+  follow_up_date DATE,
+  follow_up_notes TEXT,
+  follow_up_hook TEXT,
+  follow_up_method VARCHAR(20),
+  assigned_rep_id INTEGER,
+  assigned_rep_code VARCHAR(20),
+  claimed_at TIMESTAMPTZ DEFAULT NOW(),
+  claim_expires_at TIMESTAMPTZ,
+  claim_status VARCHAR(20) DEFAULT 'active',
+  is_customer BOOLEAN DEFAULT FALSE,
+  customer_since DATE,
+  customer_audit_id INTEGER,
+  monthly_value DECIMAL(10,2),
+  lifetime_value DECIMAL(10,2),
+  is_do_not_contact BOOLEAN DEFAULT FALSE,
+  do_not_contact_reason VARCHAR(255),
+  notes TEXT,
+  internal_notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_rep_biz_rep_id ON rep_business_records(rep_id);
+CREATE INDEX IF NOT EXISTS idx_rep_biz_status ON rep_business_records(status);
+CREATE INDEX IF NOT EXISTS idx_rep_biz_place_id ON rep_business_records(google_place_id);
+CREATE INDEX IF NOT EXISTS idx_rep_biz_city ON rep_business_records(city);
+CREATE INDEX IF NOT EXISTS idx_rep_biz_follow_up ON rep_business_records(follow_up_date);
+
 CREATE TABLE IF NOT EXISTS rep_visits (
   id SERIAL PRIMARY KEY,
   rep_id INTEGER,

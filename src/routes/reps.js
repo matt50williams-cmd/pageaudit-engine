@@ -413,6 +413,149 @@ async function repRoutes(fastify) {
     const rep = await queryOne('SELECT id, rep_code, full_name FROM reps WHERE rep_code = $1 AND status = $2', [request.params.code.toLowerCase().trim(), 'active']);
     return reply.send({ rep: rep || null });
   });
+
+  // ══════════════════════════════════════════════
+  // BUSINESS RECORDS CRM
+  // ══════════════════════════════════════════════
+
+  // ── UPSERT BUSINESS RECORD ──
+  fastify.post('/api/reps/businesses', { preHandler: requireAuth }, async (request, reply) => {
+    const rep = await queryOne('SELECT id, rep_code FROM reps WHERE email = $1', [request.user.email]);
+    if (!rep) return reply.status(403).send({ error: 'Not a registered rep' });
+    const d = request.body || {};
+    if (!d.business_name) return reply.status(400).send({ error: 'business_name required' });
+
+    // Check if record exists by place_id or name+address
+    let existing = null;
+    if (d.google_place_id) existing = await queryOne('SELECT id FROM rep_business_records WHERE rep_id = $1 AND google_place_id = $2', [rep.id, d.google_place_id]);
+    if (!existing && d.business_name) existing = await queryOne('SELECT id FROM rep_business_records WHERE rep_id = $1 AND LOWER(business_name) = LOWER($2) AND LOWER(COALESCE(city,\'\')) = LOWER($3)', [rep.id, d.business_name, d.city || '']);
+
+    if (existing) {
+      // Update
+      const record = await queryOne(
+        `UPDATE rep_business_records SET
+          business_name = COALESCE($1, business_name), address = COALESCE($2, address), city = COALESCE($3, city), state = COALESCE($4, state),
+          phone = COALESCE($5, phone), website = COALESCE($6, website), industry = COALESCE($7, industry),
+          owner_first_name = COALESCE($8, owner_first_name), owner_last_name = COALESCE($9, owner_last_name),
+          owner_direct_phone = COALESCE($10, owner_direct_phone), owner_email = COALESCE($11, owner_email),
+          owner_preferred_contact = COALESCE($12, owner_preferred_contact), best_time_to_reach = COALESCE($13, best_time_to_reach),
+          is_decision_maker = COALESCE($14, is_decision_maker), gatekeeper_name = COALESCE($15, gatekeeper_name),
+          google_place_id = COALESCE($16, google_place_id), last_scan_score = COALESCE($17, last_scan_score),
+          last_scan_data = COALESCE($18, last_scan_data), last_scanned_at = COALESCE($19, last_scanned_at),
+          status = COALESCE($20, status), interest_level = COALESCE($21, interest_level),
+          follow_up_date = COALESCE($22, follow_up_date), follow_up_notes = COALESCE($23, follow_up_notes),
+          follow_up_hook = COALESCE($24, follow_up_hook), follow_up_method = COALESCE($25, follow_up_method),
+          notes = COALESCE($26, notes), total_consultations = total_consultations + 1,
+          last_contacted_at = NOW(), contact_attempts = contact_attempts + 1, updated_at = NOW()
+        WHERE id = $27 RETURNING *`,
+        [d.business_name, d.address, d.city, d.state, d.phone, d.website, d.industry,
+         d.owner_first_name, d.owner_last_name, d.owner_direct_phone, d.owner_email,
+         d.owner_preferred_contact, d.best_time_to_reach, d.is_decision_maker, d.gatekeeper_name,
+         d.google_place_id, d.last_scan_score, d.last_scan_data ? JSON.stringify(d.last_scan_data) : null,
+         d.last_scanned_at, d.status, d.interest_level, d.follow_up_date, d.follow_up_notes,
+         d.follow_up_hook, d.follow_up_method, d.notes, existing.id]
+      );
+      // Update score history if score changed
+      if (d.last_scan_score && record) {
+        const history = record.score_history || [];
+        history.push({ date: new Date().toISOString().split('T')[0], score: d.last_scan_score });
+        await queryOne('UPDATE rep_business_records SET score_history = $1 WHERE id = $2', [JSON.stringify(history.slice(-20)), record.id]);
+      }
+      return reply.send({ success: true, record, updated: true });
+    }
+
+    // Create new
+    const record = await queryOne(
+      `INSERT INTO rep_business_records (rep_id, rep_code, business_name, address, city, state, phone, website, industry,
+        owner_first_name, owner_last_name, owner_direct_phone, owner_email, owner_preferred_contact, best_time_to_reach,
+        is_decision_maker, gatekeeper_name, google_place_id, last_scan_score, last_scan_data, last_scanned_at,
+        status, interest_level, follow_up_date, follow_up_notes, follow_up_hook, follow_up_method, notes,
+        assigned_rep_id, assigned_rep_code, claim_expires_at, total_consultations, last_contacted_at, contact_attempts)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,NOW()+INTERVAL'30 days',1,NOW(),1) RETURNING *`,
+      [rep.id, rep.rep_code, d.business_name, d.address || null, d.city || null, d.state || null, d.phone || null, d.website || null, d.industry || null,
+       d.owner_first_name || null, d.owner_last_name || null, d.owner_direct_phone || null, d.owner_email || null,
+       d.owner_preferred_contact || null, d.best_time_to_reach || null, d.is_decision_maker ?? true, d.gatekeeper_name || null,
+       d.google_place_id || null, d.last_scan_score || null, d.last_scan_data ? JSON.stringify(d.last_scan_data) : null,
+       d.last_scanned_at || null, d.status || 'prospect', d.interest_level || null,
+       d.follow_up_date || null, d.follow_up_notes || null, d.follow_up_hook || null, d.follow_up_method || null,
+       d.notes || null, rep.id, rep.rep_code]
+    );
+    return reply.send({ success: true, record });
+  });
+
+  // ── GET ALL BUSINESS RECORDS ──
+  fastify.get('/api/reps/businesses', { preHandler: requireAuth }, async (request, reply) => {
+    const rep = await queryOne('SELECT id FROM reps WHERE email = $1', [request.user.email]);
+    if (!rep) return reply.status(403).send({ error: 'Not a registered rep' });
+    const { status, city, industry, search, sort } = request.query;
+    let where = 'WHERE rep_id = $1';
+    const params = [rep.id];
+    let idx = 2;
+    if (status) { where += ` AND status = $${idx}`; params.push(status); idx++; }
+    if (city) { where += ` AND LOWER(city) = LOWER($${idx})`; params.push(city); idx++; }
+    if (industry) { where += ` AND industry = $${idx}`; params.push(industry); idx++; }
+    if (search) { where += ` AND (LOWER(business_name) LIKE LOWER($${idx}) OR LOWER(owner_first_name) LIKE LOWER($${idx}) OR LOWER(owner_last_name) LIKE LOWER($${idx}))`; params.push(`%${search}%`); idx++; }
+    const orderBy = sort === 'follow_up' ? 'follow_up_date ASC NULLS LAST' : sort === 'score' ? 'last_scan_score ASC NULLS LAST' : sort === 'recent' ? 'last_contacted_at DESC NULLS LAST' : 'updated_at DESC';
+    const records = await queryAll(`SELECT * FROM rep_business_records ${where} ORDER BY ${orderBy} LIMIT 200`, params);
+    return reply.send({ records });
+  });
+
+  // ── GET FOLLOW-UPS DUE ──
+  fastify.get('/api/reps/businesses/follow-ups-due', { preHandler: requireAuth }, async (request, reply) => {
+    const rep = await queryOne('SELECT id FROM reps WHERE email = $1', [request.user.email]);
+    if (!rep) return reply.status(403).send({ error: 'Not a registered rep' });
+    const records = await queryAll(
+      "SELECT * FROM rep_business_records WHERE rep_id = $1 AND follow_up_date <= CURRENT_DATE AND status NOT IN ('client','not_a_fit','do_not_contact') ORDER BY follow_up_date ASC",
+      [rep.id]
+    );
+    return reply.send({ records });
+  });
+
+  // ── UPDATE BUSINESS RECORD ──
+  fastify.patch('/api/reps/businesses/:id', { preHandler: requireAuth }, async (request, reply) => {
+    const rep = await queryOne('SELECT id FROM reps WHERE email = $1', [request.user.email]);
+    if (!rep) return reply.status(403).send({ error: 'Not a registered rep' });
+    const d = request.body || {};
+    const fields = [];
+    const params = [];
+    let idx = 1;
+    const allowedFields = ['status','interest_level','follow_up_date','follow_up_notes','follow_up_hook','follow_up_method','notes','owner_first_name','owner_last_name','owner_direct_phone','owner_email','best_time_to_reach','gatekeeper_name','is_do_not_contact'];
+    for (const key of allowedFields) {
+      if (d[key] !== undefined) { fields.push(`${key} = $${idx}`); params.push(d[key]); idx++; }
+    }
+    if (fields.length === 0) return reply.status(400).send({ error: 'No fields to update' });
+    fields.push('updated_at = NOW()');
+    params.push(request.params.id); params.push(rep.id);
+    const record = await queryOne(`UPDATE rep_business_records SET ${fields.join(', ')} WHERE id = $${idx} AND rep_id = $${idx + 1} RETURNING *`, params);
+    return reply.send({ success: true, record });
+  });
+
+  // ── GET SINGLE BUSINESS RECORD WITH VISIT HISTORY ──
+  fastify.get('/api/reps/businesses/:id', { preHandler: requireAuth }, async (request, reply) => {
+    const rep = await queryOne('SELECT id FROM reps WHERE email = $1', [request.user.email]);
+    if (!rep) return reply.status(403).send({ error: 'Not a registered rep' });
+    const record = await queryOne('SELECT * FROM rep_business_records WHERE id = $1 AND rep_id = $2', [request.params.id, rep.id]);
+    if (!record) return reply.status(404).send({ error: 'Record not found' });
+    const visits = await queryAll('SELECT * FROM rep_visits WHERE rep_id = $1 AND LOWER(business_name) = LOWER($2) ORDER BY visited_at DESC LIMIT 20', [rep.id, record.business_name]);
+    return reply.send({ record, visits });
+  });
+
+  // ── ADMIN: ALL BUSINESS RECORDS ──
+  fastify.get('/api/admin/businesses', { preHandler: requireAuth }, async (request, reply) => {
+    if (request.user.role !== 'admin') return reply.status(403).send({ error: 'Admin access required' });
+    const { status, rep_id, city, industry, search, limit: lim } = request.query;
+    let where = 'WHERE 1=1';
+    const params = [];
+    let idx = 1;
+    if (status) { where += ` AND b.status = $${idx}`; params.push(status); idx++; }
+    if (rep_id) { where += ` AND b.rep_id = $${idx}`; params.push(parseInt(rep_id)); idx++; }
+    if (city) { where += ` AND LOWER(b.city) = LOWER($${idx})`; params.push(city); idx++; }
+    if (industry) { where += ` AND b.industry = $${idx}`; params.push(industry); idx++; }
+    if (search) { where += ` AND (LOWER(b.business_name) LIKE LOWER($${idx}) OR LOWER(b.owner_first_name) LIKE LOWER($${idx}) OR LOWER(b.owner_direct_phone) LIKE $${idx})`; params.push(`%${search}%`); idx++; }
+    const records = await queryAll(`SELECT b.*, r.full_name as rep_name FROM rep_business_records b LEFT JOIN reps r ON b.rep_id = r.id ${where} ORDER BY b.updated_at DESC LIMIT ${parseInt(lim) || 200}`, params);
+    const stats = await queryOne(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE is_customer) as customers, COUNT(*) FILTER (WHERE status = 'following_up') as follow_ups, COUNT(*) FILTER (WHERE status = 'not_a_fit') as not_a_fit FROM rep_business_records`);
+    return reply.send({ records, stats: { total: parseInt(stats.total), customers: parseInt(stats.customers), follow_ups: parseInt(stats.follow_ups), not_a_fit: parseInt(stats.not_a_fit) } });
+  });
 }
 
 module.exports = repRoutes;
