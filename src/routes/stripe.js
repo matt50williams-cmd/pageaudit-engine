@@ -280,12 +280,19 @@ async function stripeRoutes(fastify) {
   fastify.get("/api/stripe/verify/:session_id", async (request, reply) => {
     try {
       const session = await stripe.checkout.sessions.retrieve(request.params.session_id);
+      const auditId = session.metadata?.audit_id || session.metadata?.auditId || session.client_reference_id;
+
+      // If Stripe says paid, update the audit record directly
+      if (session.payment_status === "paid" && auditId) {
+        await queryOne("UPDATE audits SET paid = TRUE, amount_paid = COALESCE(amount_paid, $1), updated_at = NOW() WHERE id = $2", [typeof session.amount_total === "number" ? session.amount_total / 100 : null, parseInt(auditId)]);
+        console.log("[VERIFY] Marked audit", auditId, "as paid via verify endpoint");
+      }
 
       return reply.send({
         paid: session.payment_status === "paid",
         email: session.customer_email,
-        audit_id: session.metadata?.audit_id || null,
-        product: session.metadata?.product || null,
+        auditId: auditId || null,
+        sessionId: session.id,
       });
     } catch (err) {
       request.log.error(err, "Stripe verify error");
