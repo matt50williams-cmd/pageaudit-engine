@@ -232,6 +232,18 @@ async function auditRoutes(fastify) {
     }
   });
 
+  // TEMPORARY TEST ROUTE — remove after webhook is verified
+  fastify.patch("/api/audits/:id/force-paid", async (request, reply) => {
+    try {
+      const audit = await queryOne("UPDATE audits SET paid = TRUE, amount_paid = 39, updated_at = NOW() WHERE id = $1 RETURNING id, paid, status", [request.params.id]);
+      if (!audit) return reply.status(404).send({ error: "Audit not found" });
+      console.log(`[TEST] Force-paid audit ${audit.id}`);
+      return reply.send({ success: true, id: audit.id, paid: true });
+    } catch (err) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
   fastify.get("/api/audits", { preHandler: requireAuth }, async (request, reply) => {
     try {
       const audits = await queryAll(
