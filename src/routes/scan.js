@@ -38,8 +38,11 @@ async function scanRoutes(fastify) {
     }
 
     const { businessName, city, state } = request.body || {};
-    if (!businessName || !city) {
-      return reply.status(400).send({ error: 'businessName and city are required' });
+    if (!businessName?.trim()) {
+      return reply.status(400).send({ error: 'Business name is required' });
+    }
+    if (!city?.trim()) {
+      return reply.status(400).send({ error: 'City is required' });
     }
 
     console.log(`[SCAN ROUTE] Teaser scan request: ${businessName}, ${city}, ${state || ''}`);
