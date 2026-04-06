@@ -336,33 +336,65 @@ function getScoreLabel(s) {
 // AI INSIGHTS (Claude Haiku)
 // ══════════════════════════════════════════════════
 async function generateInsights(biz, city, state, platforms, score, extra) {
-  if (!process.env.ANTHROPIC_API_KEY) return { executiveSummary: '', topPriorities: [], quickWins: [], whatYoureDoingWell: [], competitorIntel: '', monthlyGoal: '', revenueImpact: '' };
+  console.log('[INSIGHTS] Called. Score:', score, 'Platforms:', Object.keys(platforms || {}).join(', '));
+  if (!process.env.ANTHROPIC_API_KEY) { console.log('[INSIGHTS] No ANTHROPIC_API_KEY'); return { executiveSummary: '', topPriorities: [], quickWins: [], whatYoureDoingWell: [], competitorIntel: '', monthlyGoal: '', revenueImpact: '' }; }
+
   const p = platforms, comp = extra.competitors;
-  const prompt = `You are a senior digital marketing consultant writing a premium $149 audit. Be specific, data-driven, no fluff. Reference actual numbers.
+  const prompt = `You are a senior digital marketing consultant writing a paid audit report for a local business. Be specific and reference their actual numbers.
 
-BUSINESS: ${biz}, ${city}${state ? ', ' + state : ''}${extra.industry ? ' (' + extra.industry + ')' : ''}
-SCORE: ${score}/100 — ${getScoreLabel(score)}
+BUSINESS: ${biz}, ${city} ${state || ''}
+INDUSTRY: ${extra.industry || 'local business'}
+OVERALL SCORE: ${score}/100
 
-Google: ${p.google?.rawScore||0}/35 — ${p.google?.rating||'?'}★ (${p.google?.reviewCount||0} reviews), response ~${p.google?.responseRate||0}%
-Website: ${p.website?.rawScore||0}/25 — SSL:${p.website?.hasSSL?'Y':'N'} Speed:${p.website?.perfScore||'?'}/100
-Search: ${p.search?.rawScore||0}/20${p.search?.excluded?' (excluded)':''}
-NAP: ${p.nap?.rawScore||0}/10${p.nap?.excluded?' (excluded)':''}
-Reviews: ${p.reviews?.rawScore||0}/10 sentiment:${p.reviews?.sentiment?.sentimentScore||'?'}/10
-${comp?.competitors?.length ? `Competitors: ${comp.competitors.map((c,i)=>`${i+1}. ${c.name} ${c.rating}★ ${c.reviewCount}r`).join(', ')} | Rank #${comp.ranking||'?'}/${comp.totalInArea||'?'}` : ''}
-${extra.biggestChallenge ? `Owner: "${extra.biggestChallenge}"` : ''}
+PLATFORM DATA:
+- Google: ${p.google?.rawScore||0}/35. Rating: ${p.google?.rating||'N/A'}. Reviews: ${p.google?.reviewCount||0}. Response rate: ${p.google?.responseRate||0}%
+- Website: ${p.website?.rawScore||0}/25. PageSpeed: ${p.website?.perfScore||'N/A'}. SSL: ${p.website?.hasSSL?'Yes':'No'}
+- Search: ${p.search?.rawScore||0}/20${p.search?.excluded?' (excluded)':''}
+- NAP: ${p.nap?.rawScore||0}/10${p.nap?.excluded?' (excluded)':''}
+- Reviews: ${p.reviews?.rawScore||0}/10
+${comp?.competitors?.length ? 'COMPETITORS: ' + JSON.stringify(comp.competitors.slice(0,3).map(c=>({name:c.name,rating:c.rating,reviews:c.reviewCount}))) : ''}
 
-Return ONLY JSON:
-{"executiveSummary":"2-3 sentences with actual numbers","revenueImpact":"$ estimate with math shown","topPriorities":[{"priority":1,"title":"action","whyItMatters":"impact","howToFixIt":"exact steps","timeToComplete":"X min","difficulty":"easy","estimatedROI":"$/mo","selfServeLink":"URL"},{"priority":2,"title":"...","whyItMatters":"...","howToFixIt":"...","timeToComplete":"...","difficulty":"...","estimatedROI":"...","selfServeLink":"..."},{"priority":3,"title":"...","whyItMatters":"...","howToFixIt":"...","timeToComplete":"...","difficulty":"...","estimatedROI":"...","selfServeLink":"..."}],"quickWins":[{"title":"...","steps":["step1","step2"],"link":"URL","timeNeeded":"10 min"},{"title":"...","steps":["..."],"link":"...","timeNeeded":"..."},{"title":"...","steps":["..."],"link":"...","timeNeeded":"..."}],"whatYoureDoingWell":["specific positive 1","specific positive 2"],"competitorIntel":"specific comparison","monthlyGoal":"measurable goal with target number"}`;
+You MUST respond with ONLY a JSON object. No markdown. No backticks. No explanation. Just the raw JSON starting with {
 
+{"summary":"2-3 sentence executive summary specific to this business with their actual numbers","revenueImpact":"Estimated monthly revenue lost due to gaps found","topPriorities":[{"priority":1,"title":"specific action title","description":"exactly what to do and why","timeToComplete":"X minutes","estimatedROI":"$X-Y per month","difficulty":"easy"},{"priority":2,"title":"second action","description":"what to do","timeToComplete":"X minutes","estimatedROI":"$X per month","difficulty":"medium"},{"priority":3,"title":"third action","description":"what to do","timeToComplete":"X minutes","estimatedROI":"$X per month","difficulty":"easy"}],"quickWins":["One specific free fix today","Another specific free fix","A third specific free fix"],"whatYoureDoingWell":["specific positive with numbers","another positive"],"competitorIntel":"what competitors do that this business does not","monthlyGoal":"one measurable goal for next 30 days"}`;
+
+  console.log('[INSIGHTS] Calling Claude Haiku...');
   try {
     const res = await axios.post('https://api.anthropic.com/v1/messages', { model: 'claude-haiku-4-5-20251001', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] },
       { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 20000 });
+
     const text = res.data?.content?.[0]?.text || '';
-    const m = text.match(/\{[\s\S]*\}/);
-    if (m) return JSON.parse(m[0]);
-    console.log('[SCAN] AI response not JSON:', text.slice(0, 200));
-    return { executiveSummary: text.slice(0, 300) };
-  } catch (e) { console.error('[SCAN] AI error:', e.message); return { executiveSummary: '' }; }
+    console.log('[INSIGHTS] Claude raw response (first 300 chars):', text.slice(0, 300));
+
+    // Try to extract JSON
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        console.log('[INSIGHTS] Parsed OK. Keys:', Object.keys(parsed).join(', '));
+        // Normalize field names — Claude may use "summary" or "executiveSummary"
+        return {
+          executiveSummary: parsed.summary || parsed.executiveSummary || '',
+          revenueImpact: parsed.revenueImpact || '',
+          topPriorities: parsed.topPriorities || [],
+          quickWins: parsed.quickWins || [],
+          whatYoureDoingWell: parsed.whatYoureDoingWell || parsed.doingWell || [],
+          competitorIntel: parsed.competitorIntel || '',
+          monthlyGoal: parsed.monthlyGoal || '',
+        };
+      } catch (parseErr) {
+        console.log('[INSIGHTS] JSON parse FAILED:', parseErr.message, '| Raw:', jsonMatch[0].slice(0, 200));
+        return { executiveSummary: text.slice(0, 300), topPriorities: [], quickWins: [] };
+      }
+    }
+
+    console.log('[INSIGHTS] No JSON found in response. Full text:', text.slice(0, 500));
+    return { executiveSummary: text.slice(0, 300), topPriorities: [], quickWins: [] };
+  } catch (e) {
+    console.error('[INSIGHTS] API call FAILED:', e.message);
+    if (e.response) console.error('[INSIGHTS] Status:', e.response.status, 'Body:', JSON.stringify(e.response.data).slice(0, 200));
+    return { executiveSummary: '', topPriorities: [], quickWins: [] };
+  }
 }
 
 // ══════════════════════════════════════════════════
