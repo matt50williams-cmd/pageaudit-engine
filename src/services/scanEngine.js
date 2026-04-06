@@ -1006,8 +1006,14 @@ async function runFullScan({ businessName, city, state, website, facebookUrl, ye
     businessName, city, state, scannedAt: new Date().toISOString(),
     plan,
     overallScore, scoreLabel, platforms,
-    // Competitors (tier-filtered)
-    competitors: tieredCompetitors.competitors,
+    // Competitors (tier-filtered) — keeps {competitors, ranking, totalInArea, estimated} structure for frontend
+    competitors: {
+      competitors: tieredCompetitors.competitors,
+      ranking: compData?.ranking || null,
+      totalInArea: compData?.totalInArea || null,
+      estimated: compData?.estimated || false,
+      source: compData?.source || null,
+    },
     competitorComparison: tieredCompetitors.comparison,
     allFindings,
     // AI insights
