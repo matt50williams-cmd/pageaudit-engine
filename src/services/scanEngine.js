@@ -5,8 +5,12 @@ const https = require('https');
 
 const TIMEOUT = 10000;
 const ax = axios.create({ timeout: TIMEOUT, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' } });
+const F = (platform, severity, title, description, impact, fix) => ({ platform, severity, title, description, impact: impact || '', fix: fix || '' });
 
-// ── BRIGHTDATA PROXY ──
+// ══════════════════════════════════════
+// INFRASTRUCTURE
+// ══════════════════════════════════════
+
 function fetchViaProxy(targetUrl, timeout = 12000) {
   return new Promise((resolve, reject) => {
     const BU = process.env.BRIGHTDATA_USERNAME, BP = process.env.BRIGHTDATA_PASSWORD;
@@ -17,8 +21,8 @@ function fetchViaProxy(targetUrl, timeout = 12000) {
     const connectReq = http.request({ host: process.env.BRIGHTDATA_HOST || 'brd.superproxy.io', port: parseInt(process.env.BRIGHTDATA_PORT || '22225'), method: 'CONNECT', path: `${target.hostname}:443`, headers: { 'Proxy-Authorization': `Basic ${auth}` }, timeout });
     connectReq.on('connect', (res, socket) => {
       if (res.statusCode !== 200) { socket.destroy(); return reject(new Error(`Proxy ${res.statusCode}`)); }
-      const req = https.request({ hostname: target.hostname, path: target.pathname + target.search, method: 'GET', socket, agent: false, rejectUnauthorized: false, headers: { 'User-Agent': 'Mozilla/5.0 Chrome/122 Safari/537.36', 'Accept': 'text/html', 'Accept-Language': 'en-US,en;q=0.9' } }, (response) => {
-        let data = ''; response.on('data', c => { data += c; }); response.on('end', () => resolve({ ok: response.statusCode < 400, html: data, status: response.statusCode }));
+      const req = https.request({ hostname: target.hostname, path: target.pathname + target.search, method: 'GET', socket, agent: false, rejectUnauthorized: false, headers: { 'User-Agent': 'Mozilla/5.0 Chrome/122 Safari/537.36', Accept: 'text/html', 'Accept-Language': 'en-US,en;q=0.9' } }, (response) => {
+        let data = ''; response.on('data', c => { data += c; }); response.on('end', () => resolve({ ok: response.statusCode < 400, html: data }));
       });
       req.on('error', reject); req.end();
     });
@@ -28,37 +32,30 @@ function fetchViaProxy(targetUrl, timeout = 12000) {
   });
 }
 
-// ── GEMINI HELPER ──
 async function askGemini(prompt, timeout = 10000) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
   try {
     const res = await ax.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
-      contents: [{ parts: [{ text: prompt }] }],
-      tools: [{ google_search: {} }],
-      generationConfig: { temperature: 0, maxOutputTokens: 1000 }
+      contents: [{ parts: [{ text: prompt }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0, maxOutputTokens: 800 }
     }, { timeout });
     return res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
-  } catch (e) { console.log(`[GEMINI] Error: ${e.message}`); return null; }
+  } catch (e) { console.log(`[GEMINI] ${e.message}`); return null; }
 }
 
-const finding = (platform, severity, title, description, impact, fix) => ({ platform, severity, title, description, impact: impact || '', fix: fix || '' });
-
-// ════════════════════════════════════════════════
-// 1. GOOGLE BUSINESS PROFILE (30 pts max)
-// ════════════════════════════════════════════════
+// ══════════════════════════════════════
+// CHECK 1: GOOGLE BUSINESS PROFILE (30pts)
+// ══════════════════════════════════════
 async function checkGoogle(businessName, city, state) {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-  if (!apiKey) return { found: false, score: 0, rawScore: 0, maxScore: 30, findings: [finding('Google', 'critical', 'Google check unavailable', 'API key not configured.', '', '')] };
+  if (!apiKey) return { found: false, rawScore: 0, maxScore: 30, score: 0, findings: [F('Google', 'critical', 'Google check unavailable', 'API key not configured.', '', '')] };
 
-  const query = `${businessName} ${city} ${state}`;
-  console.log(`[SCAN] Google: "${query}"`);
-
-  const findRes = await ax.get('https://maps.googleapis.com/maps/api/place/findplacefromtext/json', { params: { input: query, inputtype: 'textquery', fields: 'place_id,name,formatted_address,business_status', key: apiKey } });
+  console.log(`[SCAN] Google: "${businessName} ${city} ${state}"`);
+  const findRes = await ax.get('https://maps.googleapis.com/maps/api/place/findplacefromtext/json', { params: { input: `${businessName} ${city} ${state}`, inputtype: 'textquery', fields: 'place_id,name,formatted_address,business_status', key: apiKey } });
   const candidate = findRes.data?.candidates?.[0];
-  if (!candidate?.place_id) return { found: false, score: 0, rawScore: 0, maxScore: 30, findings: [finding('Google', 'critical', 'Not found on Google', `Searched for "${businessName}" in ${city} — no listing found.`, 'Customers cannot find you on Google. This is the #1 way people discover local businesses.', 'Create your Google Business Profile at business.google.com immediately.')] };
+  if (!candidate?.place_id) return { found: false, rawScore: 0, maxScore: 30, score: 0, findings: [F('Google', 'critical', 'Not found on Google', `No listing found for "${businessName}" in ${city}.`, 'Customers cannot find you on Google — the #1 way people discover local businesses.', 'Create your Google Business Profile at business.google.com immediately.')] };
 
-  const detailRes = await ax.get('https://maps.googleapis.com/maps/api/place/details/json', { params: { place_id: candidate.place_id, fields: 'name,rating,user_ratings_total,formatted_address,formatted_phone_number,opening_hours,website,photos,business_status,reviews,types', key: apiKey } });
+  const detailRes = await ax.get('https://maps.googleapis.com/maps/api/place/details/json', { params: { place_id: candidate.place_id, fields: 'name,rating,user_ratings_total,formatted_address,formatted_phone_number,opening_hours,website,photos,business_status,reviews,types,editorial_summary,price_level,reservable,serves_beer,serves_wine,takeout,delivery,dine_in', key: apiKey } });
   const d = detailRes.data?.result || {};
   const rating = d.rating || 0;
   const reviewCount = d.user_ratings_total || 0;
@@ -66,588 +63,556 @@ async function checkGoogle(businessName, city, state) {
   const hoursComplete = (d.opening_hours?.weekday_text?.length || 0) === 7;
   const photoCount = d.photos?.length || 0;
   const hasWebsite = !!d.website;
+  const hasPhone = !!d.formatted_phone_number;
+  const hasDescription = !!d.editorial_summary?.overview;
   const businessStatus = d.business_status || 'UNKNOWN';
   const types = d.types || [];
-
-  // Estimate review response rate from reviews data
   const reviews = d.reviews || [];
-  const ownerReplied = reviews.filter(r => r.author_url?.includes('/maps/contrib/') === false).length; // rough estimate
-  const responseRate = reviews.length > 0 ? Math.min(Math.round((ownerReplied / reviews.length) * 100), 100) : 0;
 
-  // SCORE (30 max)
+  // Review response rate
+  const repliedCount = reviews.filter(r => r.author_url && !r.author_url.includes('/maps/contrib/')).length;
+  const responseRate = reviews.length > 0 ? Math.round((repliedCount / reviews.length) * 100) : 0;
+
+  // Recent review check
+  const now = Date.now() / 1000;
+  const mostRecentReview = reviews[0]?.time || 0;
+  const daysSinceReview = mostRecentReview ? Math.round((now - mostRecentReview) / 86400) : 999;
+
+  // SCORING (30pts max)
   let rawScore = 0;
-  // Rating (10 pts)
-  if (rating >= 4.5) rawScore += 10; else if (rating >= 4.0) rawScore += 7; else if (rating > 0) rawScore += 3;
-  // Review count (8 pts)
-  if (reviewCount >= 200) rawScore += 8; else if (reviewCount >= 50) rawScore += 5; else if (reviewCount > 0) rawScore += 2;
-  // Profile complete (6 pts)
-  if (hasHours && hoursComplete) rawScore += 2;
-  if (photoCount >= 10) rawScore += 2; else if (photoCount >= 5) rawScore += 1;
+  // Rating (10pts)
+  if (rating >= 4.8) rawScore += 10; else if (rating >= 4.5) rawScore += 8; else if (rating >= 4.0) rawScore += 6; else if (rating >= 3.5) rawScore += 3; else if (rating > 0) rawScore += 1;
+  // Review count (8pts)
+  if (reviewCount >= 500) rawScore += 8; else if (reviewCount >= 200) rawScore += 7; else if (reviewCount >= 100) rawScore += 5; else if (reviewCount >= 50) rawScore += 4; else if (reviewCount >= 20) rawScore += 2; else if (reviewCount > 0) rawScore += 1;
+  // Profile complete (6pts)
+  if (hasHours && hoursComplete) rawScore += 1;
   if (hasWebsite) rawScore += 1;
-  if (businessStatus === 'OPERATIONAL') rawScore += 1;
-  // Recent activity (3 pts) — estimated from review recency
-  const recentReview = reviews[0]?.time ? (Date.now() / 1000 - reviews[0].time) < 30 * 86400 : false;
-  if (recentReview) rawScore += 3; else if (reviews.length > 0) rawScore += 1;
-  // Response rate (3 pts)
-  if (responseRate > 50) rawScore += 3; else if (responseRate > 0) rawScore += 1;
+  if (hasPhone) rawScore += 1;
+  if (photoCount >= 10) rawScore += 1; else if (photoCount >= 5) rawScore += 0.5;
+  if (hasDescription) rawScore += 1;
+  if (types.length > 1) rawScore += 0.5;
+  // Recent activity (3pts)
+  if (daysSinceReview <= 30) rawScore += 3; else if (daysSinceReview <= 90) rawScore += 2; else if (daysSinceReview <= 180) rawScore += 1;
+  // Response rate (3pts)
+  if (responseRate >= 50) rawScore += 3; else if (responseRate >= 25) rawScore += 2; else if (responseRate > 0) rawScore += 1;
 
+  rawScore = Math.min(Math.round(rawScore), 30);
+
+  // FINDINGS
   const findings = [];
-  const f = (sev, title, desc, impact, fix) => findings.push(finding('Google', sev, title, desc, impact, fix));
+  if (rating === 0) findings.push(F('Google', 'critical', 'No Google rating', 'Your profile has no rating.', 'Businesses without ratings get far fewer clicks.', 'Ask 10 customers to leave a review this week.'));
+  else if (rating < 4.0) findings.push(F('Google', 'critical', `${rating}-star rating is hurting you`, 'Below the 4.0 threshold customers use to filter.', 'Up to 40% of potential customers filter you out.', 'Respond to negatives professionally. Ask happy customers for reviews.'));
+  else if (rating < 4.5) findings.push(F('Google', 'warning', `${rating}-star rating — room to improve`, 'Below 4.5 that top businesses maintain.', 'Businesses with 4.5+ get more clicks and calls.', 'Ask every happy customer for a review.'));
+  else findings.push(F('Google', 'good', `Strong ${rating}-star rating`, 'Excellent rating that builds trust.', '', ''));
 
-  if (rating === 0) f('critical', 'No Google rating', 'Your profile has no rating yet.', 'Businesses without ratings get far fewer clicks.', 'Ask 10 customers to leave a review this week.');
-  else if (rating < 4.0) f('critical', `${rating}-star rating is hurting you`, `Below the 4.0 threshold. Customers filter by 4+ stars.`, 'Up to 40% of potential customers are filtering you out.', 'Focus on getting 5-star reviews. Respond to every negative review professionally.');
-  else if (rating < 4.5) f('warning', `${rating}-star rating — room to improve`, `Below 4.5 threshold top businesses maintain.`, 'Businesses with 4.5+ get significantly more clicks.', 'Ask every happy customer for a review.');
-  else f('good', `Strong ${rating}-star rating`, `Excellent rating that builds trust.`, '', '');
+  if (reviewCount < 10) findings.push(F('Google', 'critical', `Only ${reviewCount} reviews`, 'Very few reviews look unestablished.', '', 'Start a review campaign. Aim for 50+ within 60 days.'));
+  else if (reviewCount < 50) findings.push(F('Google', 'warning', `${reviewCount} reviews — need more`, 'Competitors likely have more.', '', 'Send follow-up texts after every job.'));
+  else findings.push(F('Google', 'good', `${reviewCount} reviews — solid`, '', '', ''));
 
-  if (reviewCount < 10) f('critical', `Only ${reviewCount} reviews`, 'Very few reviews make you look unestablished.', 'Businesses with fewer than 10 reviews lose significant trust.', 'Start a review campaign. Aim for 50+ within 60 days.');
-  else if (reviewCount < 50) f('warning', `${reviewCount} reviews — competitors may have more`, 'More reviews = better ranking + more trust.', '', 'Send follow-up texts after every job.');
-  else f('good', `${reviewCount} reviews — solid social proof`, '', '', '');
+  if (!hasHours) findings.push(F('Google', 'warning', 'Hours missing', 'Customers assume you\'re closed.', '', 'Add hours in Google Business Profile.'));
+  if (photoCount < 5) findings.push(F('Google', 'warning', `Only ${photoCount} photos`, 'Listings with 10+ photos get 42% more requests.', '', 'Add photos of storefront, team, and work.'));
+  if (!hasWebsite) findings.push(F('Google', 'warning', 'No website linked', '', '', 'Add your website to Google Business Profile.'));
+  if (daysSinceReview > 180) findings.push(F('Google', 'warning', 'No recent reviews', `Last review was ${daysSinceReview}+ days ago.`, 'Looks like your business may be inactive.', 'Start asking for reviews immediately.'));
+  if (businessStatus !== 'OPERATIONAL') findings.push(F('Google', 'critical', `Status: ${businessStatus}`, 'Customers think you\'re closed.', '', 'Verify your business is marked open.'));
+  if (responseRate < 25 && reviewCount >= 5) findings.push(F('Google', 'warning', 'Low review response rate', `Only ${responseRate}% of reviews have owner replies.`, 'Responding shows you care about customers.', 'Reply to every Google review — even positive ones.'));
 
-  if (!hasHours) f('warning', 'Hours missing from Google', 'Customers assume you\'re closed without hours.', '', 'Add hours for every day in your Google Business Profile.');
-  if (photoCount < 5) f('warning', `Only ${photoCount} photos`, 'Listings with 10+ photos get 42% more direction requests.', '', 'Add photos of your storefront, team, and work.');
-  if (businessStatus !== 'OPERATIONAL') f('critical', `Status: ${businessStatus}`, 'Customers will think you\'re closed.', '', 'Verify your business is marked open.');
+  // Review sentiment (Gemini)
+  let sentiment = null;
+  if (reviews.length >= 3) {
+    try {
+      const reviewTexts = reviews.slice(0, 5).map(r => `${r.rating}★: "${(r.text || '').slice(0, 150)}"`).join('\n');
+      const sentRes = await askGemini(`Analyze these Google reviews:\n${reviewTexts}\nReturn JSON: {"praiseThemes":["top 3"],"complaintThemes":["top 3"],"sentimentScore":1-10}`, 8000);
+      if (sentRes) { try { sentiment = JSON.parse(sentRes.match(/\{[\s\S]*\}/)?.[0] || '{}'); } catch {} }
+    } catch {}
+  }
 
   return {
     found: true, confidence: 'high', placeId: candidate.place_id, name: d.name || businessName,
     rating, reviewCount, address: d.formatted_address || '', phone: d.formatted_phone_number || '',
-    website: d.website || '', hasHours, hoursComplete, photoCount, hasWebsite, businessStatus, types,
-    responseRate, reviews: reviews.slice(0, 5).map(r => ({ text: r.text?.slice(0, 200), rating: r.rating, time: r.time })),
+    website: d.website || '', hasHours, hoursComplete, photoCount, hasWebsite, hasPhone, hasDescription,
+    businessStatus, types, responseRate, daysSinceReview, sentiment,
+    reviews: reviews.slice(0, 5).map(r => ({ text: r.text?.slice(0, 200), rating: r.rating, time: r.time })),
     rawScore, maxScore: 30, score: Math.round((rawScore / 30) * 100), findings
   };
 }
 
-// ════════════════════════════════════════════════
-// 2. WEBSITE AUDIT (25 pts max)
-// ════════════════════════════════════════════════
+// ══════════════════════════════════════
+// CHECK 2: WEBSITE AUDIT (25pts)
+// ══════════════════════════════════════
 async function checkWebsite(websiteUrl) {
-  if (!websiteUrl) return { found: false, rawScore: 0, maxScore: 25, score: 0, findings: [finding('Website', 'warning', 'No website provided', 'Cannot analyze website performance.', '', 'Add your website URL.')] };
+  if (!websiteUrl) return { found: false, rawScore: 0, maxScore: 25, score: 0, findings: [F('Website', 'warning', 'No website provided', '', '', 'Add your website URL.')] };
   let url = websiteUrl.trim(); if (!url.startsWith('http')) url = `https://${url}`;
-  // Strip UTM/tracking params for clean analysis
   try { const u = new URL(url); u.search = ''; url = u.toString().replace(/\/$/, ''); } catch {}
   console.log(`[SCAN] Website: ${url}`);
 
   let rawScore = 0;
   const findings = [];
-  const f = (sev, title, desc, impact, fix) => findings.push(finding('Website', sev, title, desc, impact, fix));
 
-  // 2a. SSL Check (5 pts)
+  // SSL (5pts)
   let hasSSL = false;
   try {
-    const sslRes = await ax.get(url, { timeout: 8000, maxRedirects: 5 });
-    hasSSL = sslRes.request?.res?.responseUrl?.startsWith('https://') || sslRes.config?.url?.startsWith('https://');
-    if (hasSSL) { rawScore += 5; f('good', 'SSL certificate active', 'Your site uses HTTPS.', '', ''); }
-    else { f('critical', 'No SSL certificate', 'Your website doesn\'t use HTTPS.', 'Browsers show "Not Secure" warning — customers leave immediately.', 'Install an SSL certificate. Most hosts offer free SSL via Let\'s Encrypt.'); }
-  } catch { f('warning', 'Website unreachable', 'Could not connect to your website.', '', 'Check if your website is online.'); }
+    const r = await ax.get(url, { timeout: 8000, maxRedirects: 5 });
+    hasSSL = (r.request?.res?.responseUrl || r.config?.url || '').startsWith('https://');
+    if (hasSSL) { rawScore += 5; findings.push(F('Website', 'good', 'SSL active', '', '', '')); }
+    else findings.push(F('Website', 'critical', 'No SSL', 'Browsers show "Not Secure" warning.', 'Customers leave immediately.', 'Install SSL — most hosts offer free via Let\'s Encrypt.'));
+  } catch { findings.push(F('Website', 'warning', 'Website unreachable', '', '', 'Check if your site is online.')); }
 
-  // 2b. Meta Tags Scrape (10 pts)
-  let html = '';
+  // Meta tags (10pts)
   try {
-    const htmlRes = await ax.get(url, { timeout: 8000 });
-    html = htmlRes.data || '';
+    const r = await ax.get(url, { timeout: 8000 });
+    const html = r.data || '';
     const $ = cheerio.load(html);
     const title = $('title').text().trim();
     const metaDesc = $('meta[name="description"]').attr('content') || '';
-    const ogTitle = $('meta[property="og:title"]').attr('content') || '';
-    const ogImage = $('meta[property="og:image"]').attr('content') || '';
+    const ogTitle = $('meta[property="og:title"]').attr('content');
+    const ogImage = $('meta[property="og:image"]').attr('content');
     const h1 = $('h1').first().text().trim();
     const hasSchema = html.includes('application/ld+json');
-    const hasPhone = /(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})|tel:/i.test(html);
-    const hasAddress = /\b\d{2,5}\s+[A-Z][a-z]+\s+(St|Ave|Blvd|Dr|Rd|Ln|Way|Ct)/i.test(html);
+    const hasPhoneOnSite = /(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})|tel:/i.test(html);
+    const hasAddr = /\b\d{2,5}\s+[A-Z][a-z]+\s+(St|Ave|Blvd|Dr|Rd|Ln|Way|Ct)/i.test(html);
+    const hasCTA = /book\s*(now|online|appointment)|call\s*(us|now|today)|contact\s*us|schedule|get\s*quote/i.test(html);
 
-    if (title && title.length <= 60) rawScore += 2; else if (title) { rawScore += 1; f('warning', 'Title tag too long', `Your title is ${title.length} characters (should be under 60).`, '', 'Shorten your title tag to under 60 characters.'); }
-    else f('critical', 'Missing title tag', 'No title tag found.', 'Google cannot properly index your homepage.', 'Add a descriptive title tag.');
+    if (title && title.length <= 60) rawScore += 2; else if (title) { rawScore += 1; findings.push(F('Website', 'warning', 'Title tag too long', `${title.length} chars (should be under 60).`, '', 'Shorten title tag.')); }
+    else findings.push(F('Website', 'critical', 'Missing title tag', '', 'Google can\'t index your page properly.', 'Add a title tag.'));
 
-    if (metaDesc && metaDesc.length <= 160) rawScore += 2; else if (!metaDesc) f('warning', 'Missing meta description', 'No meta description found.', 'Google shows random text instead of your description.', 'Add a compelling meta description under 160 characters.');
+    if (metaDesc && metaDesc.length <= 160) rawScore += 2; else if (!metaDesc) findings.push(F('Website', 'warning', 'Missing meta description', '', 'Google shows random text.', 'Add meta description under 160 chars.'));
     else rawScore += 1;
 
-    if (ogTitle && ogImage) { rawScore += 1; } else f('warning', 'Missing social sharing tags', 'Links shared on Facebook/text show no preview.', '', 'Add og:title and og:image meta tags.');
-    if (h1) rawScore += 1; else f('warning', 'No H1 heading', 'Missing main heading hurts SEO.', '', 'Add an H1 heading to your homepage.');
-    if (hasSchema) { rawScore += 1; f('good', 'Schema markup found', 'Structured data helps Google understand your business.', '', ''); }
-    else f('warning', 'No schema markup', 'Missing structured data.', 'Google can\'t show rich results for your business.', 'Add LocalBusiness schema markup.');
-    if (hasPhone) rawScore += 1; else f('warning', 'No phone number on website', 'Customers can\'t easily call you.', '', 'Add your phone number prominently.');
-    if (hasAddress) rawScore += 1; else f('warning', 'No address on website', 'Helps Google verify your location.', '', 'Add your business address to your website.');
-  } catch (e) { console.log(`[SCAN] HTML scrape failed: ${e.message}`); }
+    if (ogTitle && ogImage) rawScore += 1; else findings.push(F('Website', 'warning', 'No social sharing tags', 'Links shared on social show no preview.', '', 'Add og:title and og:image.'));
+    if (h1) rawScore += 1; else findings.push(F('Website', 'warning', 'No H1 heading', '', '', 'Add H1 to homepage.'));
+    if (hasSchema) { rawScore += 1; findings.push(F('Website', 'good', 'Schema markup found', '', '', '')); }
+    else findings.push(F('Website', 'warning', 'No schema markup', '', 'Google can\'t show rich results.', 'Add LocalBusiness JSON-LD.'));
+    if (hasPhoneOnSite) rawScore += 1; else findings.push(F('Website', 'warning', 'No phone on website', '', '', 'Add phone number prominently.'));
+    if (hasAddr) rawScore += 1; else findings.push(F('Website', 'warning', 'No address on website', '', '', 'Add your business address.'));
+    if (hasCTA) rawScore += 1; else findings.push(F('Website', 'warning', 'No CTA button found', 'No book/call/contact button detected.', '', 'Add a prominent CTA button.'));
+  } catch (e) { console.log(`[SCAN] Meta scrape: ${e.message}`); }
 
-  // 2c. PageSpeed (10 pts)
+  // PageSpeed (10pts)
   let perfScore = 0, loadTime = null;
   try {
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-    const psParams = { url, strategy: 'mobile', category: 'performance' };
-    if (apiKey) psParams.key = apiKey;
-    const psRes = await ax.get('https://www.googleapis.com/pagespeedonline/v5/runPagespeed', { params: psParams, timeout: 30000 });
-    const lh = psRes.data?.lighthouseResult;
-    perfScore = Math.round((lh?.categories?.performance?.score || 0) * 100);
-    const fcp = lh?.audits?.['first-contentful-paint']?.numericValue;
+    const params = { url, strategy: 'mobile', category: 'performance' };
+    if (apiKey) params.key = apiKey;
+    const r = await ax.get('https://www.googleapis.com/pagespeedonline/v5/runPagespeed', { params, timeout: 30000 });
+    perfScore = Math.round((r.data?.lighthouseResult?.categories?.performance?.score || 0) * 100);
+    const fcp = r.data?.lighthouseResult?.audits?.['first-contentful-paint']?.numericValue;
     loadTime = fcp ? Math.round(fcp / 100) / 10 : null;
 
-    if (perfScore >= 90) { rawScore += 10; f('good', `Excellent speed: ${perfScore}/100`, 'Fast mobile performance.', '', ''); }
-    else if (perfScore >= 70) { rawScore += 7; f('good', `Good speed: ${perfScore}/100`, '', '', ''); }
-    else if (perfScore >= 50) { rawScore += 4; f('warning', `Speed ${perfScore}/100 — needs work`, 'Below recommended 70+ threshold.', '53% of mobile users leave sites loading over 3 seconds.', 'Optimize images, enable compression.'); }
-    else { rawScore += 1; f('critical', `Speed ${perfScore}/100 — very slow`, 'Google penalizes slow sites.', '', 'Major performance overhaul needed.'); }
-  } catch (e) { console.log(`[SCAN] PageSpeed failed: ${e.message}`); f('warning', 'Could not test website speed', '', '', ''); }
+    if (perfScore >= 90) { rawScore += 10; findings.push(F('Website', 'good', `Speed ${perfScore}/100`, '', '', '')); }
+    else if (perfScore >= 70) { rawScore += 7; findings.push(F('Website', 'good', `Speed ${perfScore}/100`, '', '', '')); }
+    else if (perfScore >= 50) { rawScore += 4; findings.push(F('Website', 'warning', `Speed ${perfScore}/100`, 'Below 70 threshold.', '53% of users leave slow sites.', 'Optimize images, enable compression.')); }
+    else { rawScore += 1; findings.push(F('Website', 'critical', `Speed ${perfScore}/100`, 'Very slow.', 'Google penalizes slow sites.', 'Major performance overhaul needed.')); }
+  } catch (e) { console.log(`[SCAN] PageSpeed: ${e.message}`); }
 
-  return { found: true, confidence: 'high', hasSSL, perfScore, loadTime, rawScore, maxScore: 25, score: Math.round((rawScore / 25) * 100), findings };
+  return { found: true, confidence: 'high', hasSSL, perfScore, loadTime, rawScore: Math.min(rawScore, 25), maxScore: 25, score: Math.round((Math.min(rawScore, 25) / 25) * 100), findings };
 }
 
-// ════════════════════════════════════════════════
-// 3. FACEBOOK (15 pts max)
-// ════════════════════════════════════════════════
+// ══════════════════════════════════════
+// CHECK 3: FACEBOOK (15pts)
+// ══════════════════════════════════════
 async function checkFacebook(businessName, city, state, facebookUrl) {
   console.log(`[SCAN] Facebook: ${businessName} ${city}`);
-
-  // Find Facebook URL via Gemini with grounded search
   let fbUrl = facebookUrl || null;
   if (!fbUrl) {
-    const geminiResult = await askGemini(`Search for the Facebook business page of "${businessName}" located in ${city}, ${state}. Return ONLY the facebook.com URL. If not found return NOT_FOUND. Do not guess — only return a URL you found via search.`, 12000);
-    if (geminiResult && !geminiResult.includes('NOT_FOUND') && geminiResult.includes('facebook.com')) {
-      const urlMatch = geminiResult.match(/https?:\/\/(www\.)?facebook\.com\/[^\s"',\]]+/);
-      fbUrl = urlMatch ? urlMatch[0].replace(/[.,;)]+$/, '') : null;
-    }
+    const g = await askGemini(`Find the official Facebook business page URL for "${businessName}" in ${city}, ${state}. Return ONLY the facebook.com URL or NOT_FOUND.`, 10000);
+    if (g && !g.includes('NOT_FOUND') && g.includes('facebook.com')) { const m = g.match(/https?:\/\/(www\.)?facebook\.com\/[^\s"',\]]+/); if (m) fbUrl = m[0].replace(/[.,;)]+$/, ''); }
   }
-  // Fallback: try direct Facebook search scrape
-  if (!fbUrl) {
-    try {
-      const searchRes = await ax.get(`https://www.facebook.com/search/pages/?q=${encodeURIComponent(businessName + ' ' + city)}`, { timeout: 6000 });
-      const fbMatch = (searchRes.data || '').match(/facebook\.com\/(?!search)[a-zA-Z0-9.]+/);
-      if (fbMatch) fbUrl = 'https://www.' + fbMatch[0];
-    } catch {}
-  }
+  if (!fbUrl) return { found: false, rawScore: 0, maxScore: 15, score: 0, findings: [F('Facebook', 'critical', 'No Facebook page found', `Could not find a Facebook page for ${businessName}.`, 'Over 70% of consumers check Facebook before visiting.', 'Create a Facebook Business Page at facebook.com/pages/create.')] };
 
-  if (!fbUrl) {
-    return { found: false, rawScore: 0, maxScore: 15, score: 0, findings: [finding('Facebook', 'critical', 'No Facebook page found', `Could not find a Facebook business page for ${businessName}.`, 'Over 70% of consumers check a business Facebook page before visiting.', 'Create a Facebook Business Page at facebook.com/pages/create.')] };
-  }
-
-  // Scrape via BrightData
   let rawScore = 0;
   const findings = [];
-  const f = (sev, title, desc, impact, fix) => findings.push(finding('Facebook', sev, title, desc, impact, fix));
-  let pageData = { url: fbUrl, followers: null, lastPostDays: null, rating: null };
+  const pageData = { url: fbUrl, followers: null, rating: null, active: false };
 
   try {
     const res = await fetchViaProxy(fbUrl, 10000);
     if (res.ok && res.html) {
-      const $ = cheerio.load(res.html);
       const text = res.html;
-
-      // Extract followers
       const followerMatch = text.match(/([\d,\.]+[KkMm]?)\s*(?:followers|people follow|people like)/i);
       if (followerMatch) pageData.followers = followerMatch[1];
-
-      // Extract rating
       const ratingMatch = text.match(/([\d.]+)\s*(?:out of 5|\/5|stars)/i);
       if (ratingMatch) pageData.rating = parseFloat(ratingMatch[1]);
-
-      rawScore += 5; // Page exists
-      f('good', 'Facebook page found', `Found at ${fbUrl}`, '', '');
-
-      if (pageData.followers) {
-        const fc = parseInt(pageData.followers.replace(/[^0-9]/g, '')) || 0;
-        if (fc >= 1000) rawScore += 3;
-        else if (fc >= 500) rawScore += 2;
-        else rawScore += 1;
-      }
-
-      // Estimate activity from page content
       const hasRecentPosts = /ago|yesterday|today|hours? ago|minutes? ago/i.test(text);
-      if (hasRecentPosts) { rawScore += 4; f('good', 'Page appears active', 'Recent activity detected.', '', ''); }
-      else { rawScore += 1; f('warning', 'Facebook page may be inactive', 'No recent posts detected.', 'Inactive pages signal to customers your business may not be active.', 'Post at least 2-3 times per week.'); }
+      pageData.active = hasRecentPosts;
 
-      if (pageData.rating && pageData.rating >= 4.0) rawScore += 3;
-      else if (pageData.rating) rawScore += 1;
+      rawScore += 5; // exists
+      if (pageData.followers) { const fc = parseInt(String(pageData.followers).replace(/[^0-9]/g, '')) || 0; if (fc >= 1000) rawScore += 3; else if (fc >= 500) rawScore += 2; else rawScore += 1; }
+      if (hasRecentPosts) { rawScore += 4; findings.push(F('Facebook', 'good', 'Page is active', '', '', '')); }
+      else { rawScore += 1; findings.push(F('Facebook', 'warning', 'Page appears inactive', 'No recent posts detected.', 'Inactive pages signal business may not be active.', 'Post 2-3 times per week.')); }
+      if (pageData.rating && pageData.rating >= 4.0) rawScore += 3; else if (pageData.rating) rawScore += 1;
+      findings.push(F('Facebook', 'good', 'Facebook page found', `Found at ${fbUrl}${pageData.followers ? ` — ${pageData.followers} followers` : ''}`, '', ''));
     }
   } catch (e) {
-    console.log(`[SCAN] Facebook scrape failed: ${e.message}`);
-    rawScore += 2; // We found the URL at least
-    f('warning', 'Facebook page found but could not fully analyze', '', '', '');
+    console.log(`[SCAN] Facebook scrape: ${e.message}`);
+    rawScore += 2; findings.push(F('Facebook', 'warning', 'Found but could not fully analyze', '', '', ''));
   }
 
-  return { found: true, confidence: 'medium', ...pageData, rawScore, maxScore: 15, score: Math.round((rawScore / 15) * 100), findings };
+  return { found: true, confidence: 'medium', ...pageData, rawScore: Math.min(rawScore, 15), maxScore: 15, score: Math.round((Math.min(rawScore, 15) / 15) * 100), findings };
 }
 
-// ════════════════════════════════════════════════
-// 4. YELP (15 pts max)
-// ════════════════════════════════════════════════
+// ══════════════════════════════════════
+// CHECK 4: YELP (15pts)
+// ══════════════════════════════════════
 async function checkYelp(businessName, city, state) {
   console.log(`[SCAN] Yelp: ${businessName} ${city}`);
-  const searchUrl = `https://www.yelp.com/search?find_desc=${encodeURIComponent(businessName)}&find_loc=${encodeURIComponent(city + ' ' + state)}`;
-
-  let rawScore = 0;
+  let rawScore = 0, rating = 0, reviewCount = 0, claimed = false;
   const findings = [];
-  const f = (sev, title, desc, impact, fix) => findings.push(finding('Yelp', sev, title, desc, impact, fix));
 
-  try {
-    let html = '', rating = 0, reviewCount = 0, claimed = false;
+  // Find URL via Gemini
+  let directUrl = null;
+  const g = await askGemini(`Find the Yelp page URL for "${businessName}" in ${city}, ${state}. Return ONLY the yelp.com URL or NOT_FOUND.`, 8000);
+  if (g && g.includes('yelp.com') && !g.includes('NOT_FOUND')) { const m = g.match(/https?:\/\/(www\.)?yelp\.com\/biz\/[^\s"',\]]+/); if (m) directUrl = m[0]; }
 
-    // Method 1: Try Gemini to find Yelp URL
-    const yelpGemini = await askGemini(`Find the Yelp business page URL for "${businessName}" in ${city}, ${state}. Return ONLY the yelp.com URL or NOT_FOUND.`, 8000);
-    let directUrl = null;
-    if (yelpGemini && yelpGemini.includes('yelp.com') && !yelpGemini.includes('NOT_FOUND')) {
-      const m = yelpGemini.match(/https?:\/\/(www\.)?yelp\.com\/biz\/[^\s"',\]]+/);
-      if (m) directUrl = m[0];
-    }
+  // Scrape
+  let html = '';
+  if (directUrl) try { const r = await fetchViaProxy(directUrl, 8000); html = r.html || ''; } catch {}
+  if (!html) { const searchUrl = `https://www.yelp.com/search?find_desc=${encodeURIComponent(businessName)}&find_loc=${encodeURIComponent(city + ' ' + state)}`; try { const r = await fetchViaProxy(searchUrl, 8000); html = r.html || ''; } catch {} }
+  if (!html) { const slug = `${businessName}-${city}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80); try { const r = await ax.get(`https://www.yelp.com/biz/${slug}`, { timeout: 5000 }); html = r.data || ''; } catch {} }
 
-    // Method 2: Try direct business page via BrightData
-    if (directUrl) {
-      try { const r = await fetchViaProxy(directUrl, 8000); html = r.html || ''; } catch {}
-    }
-
-    // Method 3: Try search page
-    if (!html) {
-      try { const r = await fetchViaProxy(searchUrl, 8000); html = r.html || ''; } catch {}
-    }
-    if (!html) { try { const r = await ax.get(searchUrl, { timeout: 6000 }); html = r.data || ''; } catch {} }
-
-    // Also try slug-based direct URL
-    if (!html) {
-      const slug = `${businessName}-${city}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
-      try { const r = await ax.get(`https://www.yelp.com/biz/${slug}`, { timeout: 5000 }); html = r.data || ''; } catch {}
-    }
-
-    if (html) {
-      const ratingMatch = html.match(/(\d\.\d)\s*star/i) || html.match(/aria-label="(\d\.?\d?)\s*star/i) || html.match(/ratingValue.*?(\d\.?\d?)/i);
-      rating = parseFloat(ratingMatch?.[1] || '0');
-      const revMatch = html.match(/(\d+)\s*review/i);
-      reviewCount = parseInt(revMatch?.[1] || '0');
-      claimed = html.toLowerCase().includes('claimed');
-    }
-
-    if (rating > 0) {
-      rawScore += 5; // Listed and found
-      if (claimed) { rawScore += 0; } else { f('critical', 'Yelp page not claimed', 'You can\'t respond to reviews on an unclaimed page.', 'Unclaimed pages show outdated info.', 'Claim at biz.yelp.com — it\'s free.'); }
-      if (rating >= 4.0) rawScore += 5; else if (rating >= 3.5) rawScore += 3; else rawScore += 1;
-      if (reviewCount >= 50) rawScore += 5; else if (reviewCount >= 20) rawScore += 3; else rawScore += 1;
-
-      if (rating < 4.0) f('warning', `Yelp rating ${rating} stars`, `Below 4.0 deters potential customers.`, '', 'Focus on service quality and ask happy customers to review.');
-      else f('good', `${rating}-star Yelp rating`, `${reviewCount} reviews.`, '', '');
-    } else {
-      f('warning', 'Not found on Yelp', `Could not find ${businessName} on Yelp.`, 'Missing from a major review platform.', 'Add your business at biz.yelp.com.');
-    }
-
-    return { found: rating > 0, confidence: rating > 0 ? 'medium' : 'low', rating, reviewCount, claimed, rawScore, maxScore: 15, score: Math.round((rawScore / 15) * 100), findings };
-  } catch (e) {
-    console.log(`[SCAN] Yelp failed: ${e.message}`);
-    return { found: false, rawScore: 0, maxScore: 15, score: 0, findings: [finding('Yelp', 'warning', 'Yelp check failed', 'Could not search Yelp.', '', '')] };
+  if (html) {
+    const rm = html.match(/(\d\.\d)\s*star/i) || html.match(/aria-label="(\d\.?\d?)\s*star/i) || html.match(/ratingValue.*?(\d\.?\d?)/i);
+    rating = parseFloat(rm?.[1] || '0');
+    const revm = html.match(/(\d+)\s*review/i); reviewCount = parseInt(revm?.[1] || '0');
+    claimed = html.toLowerCase().includes('claimed');
   }
+
+  if (rating > 0) {
+    rawScore += 5;
+    if (!claimed) findings.push(F('Yelp', 'critical', 'Page not claimed', '', 'Can\'t respond to reviews.', 'Claim at biz.yelp.com — free.'));
+    if (rating >= 4.0) rawScore += 5; else if (rating >= 3.5) rawScore += 3; else rawScore += 1;
+    if (reviewCount >= 50) rawScore += 5; else if (reviewCount >= 20) rawScore += 3; else rawScore += 1;
+    if (rating < 4.0) findings.push(F('Yelp', 'warning', `Yelp rating ${rating} stars`, '', '', 'Improve service and ask happy customers to review.'));
+    else findings.push(F('Yelp', 'good', `${rating}-star Yelp rating`, `${reviewCount} reviews.`, '', ''));
+  } else {
+    findings.push(F('Yelp', 'warning', 'Not found on Yelp', '', 'Missing from a major review platform.', 'Add your business at biz.yelp.com.'));
+  }
+
+  return { found: rating > 0, confidence: rating > 0 ? 'medium' : 'low', rating, reviewCount, claimed, rawScore: Math.min(rawScore, 15), maxScore: 15, score: Math.round((Math.min(rawScore, 15) / 15) * 100), findings };
 }
 
-// ════════════════════════════════════════════════
-// 5. BING PLACES (5 pts — part of Other)
-// ════════════════════════════════════════════════
+// ══════════════════════════════════════
+// CHECK 5: BING PLACES (5pts)
+// ══════════════════════════════════════
 async function checkBing(businessName, city, state, googlePhone) {
   console.log(`[SCAN] Bing: ${businessName} ${city}`);
   let rawScore = 0;
   const findings = [];
-  const f = (sev, title, desc, impact, fix) => findings.push(finding('Bing', sev, title, desc, impact, fix));
-
   try {
-    const searchRes = await ax.get(`https://www.bing.com/search?q=${encodeURIComponent(businessName + ' ' + city + ' ' + state)}`, { timeout: 6000 });
-    const text = (searchRes.data || '').toLowerCase();
-    const listed = text.includes(businessName.toLowerCase().split(' ')[0]);
-    if (listed) { rawScore += 3; f('good', 'Found on Bing', 'Your business appears in Bing search results.', '', ''); }
-    else f('warning', 'Not prominent on Bing', '', '', 'Claim your Bing Places listing at bingplaces.com.');
-
-    // NAP check
-    if (googlePhone) {
-      const phoneDigits = googlePhone.replace(/[^0-9]/g, '');
-      if (phoneDigits && text.includes(phoneDigits.slice(-7))) { rawScore += 2; }
-      else { f('warning', 'Phone number inconsistent on Bing', 'Your Google phone number wasn\'t found in Bing results.', 'Inconsistent info confuses search engines.', 'Verify your info at bingplaces.com.'); }
-    }
-  } catch { f('warning', 'Bing check failed', '', '', ''); }
-
+    const r = await ax.get(`https://www.bing.com/search?q=${encodeURIComponent(businessName + ' ' + city + ' ' + state)}`, { timeout: 6000 });
+    const text = (r.data || '').toLowerCase();
+    if (text.includes(businessName.toLowerCase().split(' ')[0])) { rawScore += 3; findings.push(F('Bing', 'good', 'Found on Bing', '', '', '')); }
+    else findings.push(F('Bing', 'warning', 'Not prominent on Bing', '', '', 'Claim at bingplaces.com.'));
+    if (googlePhone) { const digits = googlePhone.replace(/[^0-9]/g, ''); if (digits && text.includes(digits.slice(-7))) rawScore += 2; else findings.push(F('Bing', 'warning', 'Phone inconsistent on Bing', '', '', 'Verify info at bingplaces.com.')); }
+  } catch { findings.push(F('Bing', 'warning', 'Bing check failed', '', '', '')); }
   return { rawScore, maxScore: 5, findings };
 }
 
-// ════════════════════════════════════════════════
-// 6. BBB (5 pts — part of Other)
-// ════════════════════════════════════════════════
+// ══════════════════════════════════════
+// CHECK 6: APPLE MAPS (5pts)
+// ══════════════════════════════════════
+async function checkAppleMaps(businessName, city, state) {
+  console.log(`[SCAN] Apple Maps: ${businessName} ${city}`);
+  let rawScore = 0;
+  const findings = [];
+  const g = await askGemini(`Search for "${businessName}" in ${city}, ${state} on Apple Maps. Is it listed? Is it claimed? What info shows? Answer briefly.`, 8000);
+  if (g) {
+    const listed = g.toLowerCase().includes('listed') || g.toLowerCase().includes('found') || g.toLowerCase().includes('shows');
+    const claimedApple = g.toLowerCase().includes('claimed');
+    if (listed) { rawScore += 3; findings.push(F('Apple Maps', 'good', 'Listed on Apple Maps', '', '', '')); }
+    else findings.push(F('Apple Maps', 'warning', 'Not found on Apple Maps', '', 'Apple Maps reaches 1 billion iPhone users.', 'Claim your listing at mapsconnect.apple.com.'));
+    if (claimedApple) { rawScore += 2; } else if (listed) { findings.push(F('Apple Maps', 'warning', 'Apple Maps listing unclaimed', 'Apple Business Connect launched recently — most businesses haven\'t claimed yet.', 'This is a competitive advantage opportunity.', 'Claim at businessconnect.apple.com — free.')); }
+  } else {
+    findings.push(F('Apple Maps', 'warning', 'Apple Maps check unavailable', '', '', ''));
+  }
+  return { rawScore, maxScore: 5, findings };
+}
+
+// ══════════════════════════════════════
+// CHECK 7: BBB (5pts)
+// ══════════════════════════════════════
 async function checkBBB(businessName, city, state) {
   console.log(`[SCAN] BBB: ${businessName} ${city}`);
   let rawScore = 0;
   const findings = [];
-  const f = (sev, title, desc, impact, fix) => findings.push(finding('BBB', sev, title, desc, impact, fix));
-
   try {
     const url = `https://www.bbb.org/search?find_country=USA&find_text=${encodeURIComponent(businessName)}&find_loc=${encodeURIComponent(city + ', ' + state)}`;
     let html = '';
     try { const r = await fetchViaProxy(url, 8000); html = r.html || ''; } catch {}
-    if (!html) { const r = await ax.get(url, { timeout: 6000 }); html = r.data || ''; }
-
-    const $ = cheerio.load(html);
-    const hasResult = html.toLowerCase().includes(businessName.toLowerCase().split(' ')[0]);
-    const accredited = html.includes('BBB Accredited') || html.includes('accredited');
-    const ratingMatch = html.match(/rating[:\s]*(A\+|A|B\+|B|C\+|C|D|F)/i);
-    const bbbRating = ratingMatch ? ratingMatch[1] : null;
-
-    if (hasResult) {
-      rawScore += 2;
-      f('good', 'Found on BBB', bbbRating ? `BBB Rating: ${bbbRating}` : 'Listed on Better Business Bureau.', '', '');
-      if (accredited) { rawScore += 2; f('good', 'BBB Accredited', 'This builds significant customer trust.', '', ''); }
-      if (bbbRating && ['A+', 'A'].includes(bbbRating)) rawScore += 1;
-    } else {
-      f('warning', 'Not found on BBB', 'Not listed on Better Business Bureau.', 'Many customers check BBB before hiring.', 'Register at bbb.org to build credibility.');
+    if (!html) try { const r = await ax.get(url, { timeout: 6000 }); html = r.data || ''; } catch {}
+    if (html) {
+      const hasResult = html.toLowerCase().includes(businessName.toLowerCase().split(' ')[0]);
+      const accredited = html.includes('BBB Accredited') || html.includes('accredited');
+      const ratingMatch = html.match(/rating[:\s]*(A\+|A|B\+|B|C\+|C|D|F)/i);
+      if (hasResult) {
+        rawScore += 2; findings.push(F('BBB', 'good', 'Found on BBB', ratingMatch ? `Rating: ${ratingMatch[1]}` : '', '', ''));
+        if (accredited) { rawScore += 2; findings.push(F('BBB', 'good', 'BBB Accredited', 'Builds significant trust.', '', '')); }
+        if (ratingMatch && ['A+', 'A'].includes(ratingMatch[1])) rawScore += 1;
+      } else { findings.push(F('BBB', 'warning', 'Not found on BBB', '', 'Many customers check BBB.', 'Register at bbb.org.')); }
     }
-  } catch { f('warning', 'BBB check failed', '', '', ''); }
-
-  return { rawScore, maxScore: 5, findings, accredited: false, bbbRating: null };
-}
-
-// ════════════════════════════════════════════════
-// 7. COMPETITOR ANALYSIS
-// ════════════════════════════════════════════════
-async function checkCompetitors(businessName, city, state, googleData) {
-  console.log(`[SCAN] Competitors: ${businessName} ${city}`);
-  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-  if (!apiKey || !googleData?.placeId) return { competitors: [], ranking: null };
-
-  try {
-    // Get the business type from Google categories
-    const type = googleData.types?.[0] || 'establishment';
-    const addr = googleData.address || `${city}, ${state}`;
-
-    // First get lat/lng
-    const geoRes = await ax.get('https://maps.googleapis.com/maps/api/geocode/json', { params: { address: addr, key: apiKey } });
-    const loc = geoRes.data?.results?.[0]?.geometry?.location;
-    if (!loc) return { competitors: [], ranking: null };
-
-    // Search nearby — try specific type first, fallback to keyword search
-    let nearbyRes = await ax.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', {
-      params: { location: `${loc.lat},${loc.lng}`, radius: 8000, type, key: apiKey }
-    });
-    // If few results, try keyword search instead
-    if ((nearbyRes.data?.results || []).length < 3) {
-      nearbyRes = await ax.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', {
-        params: { location: `${loc.lat},${loc.lng}`, radius: 10000, keyword: type.replace(/_/g, ' '), key: apiKey }
-      });
-    }
-
-    const competitors = (nearbyRes.data?.results || [])
-      .filter(p => p.place_id !== googleData.placeId && p.rating > 0)
-      .slice(0, 5)
-      .map(p => ({ name: p.name, rating: p.rating || 0, reviewCount: p.user_ratings_total || 0, address: p.vicinity || '' }));
-
-    // Calculate ranking
-    const allBiz = [{ name: businessName, rating: googleData.rating, reviewCount: googleData.reviewCount }, ...competitors];
-    allBiz.sort((a, b) => (b.rating * 10 + Math.log(b.reviewCount + 1)) - (a.rating * 10 + Math.log(a.reviewCount + 1)));
-    const ranking = allBiz.findIndex(b => b.name === businessName) + 1;
-
-    return { competitors, ranking, totalInArea: allBiz.length };
-  } catch (e) {
-    console.log(`[SCAN] Competitors failed: ${e.message}`);
-    return { competitors: [], ranking: null };
-  }
-}
-
-// ════════════════════════════════════════════════
-// 8. NAP CONSISTENCY (5 pts — part of Other)
-// ════════════════════════════════════════════════
-async function checkNAP(googleData, bingData) {
-  let rawScore = 0;
-  const findings = [];
-  const f = (sev, title, desc, impact, fix) => findings.push(finding('NAP', sev, title, desc, impact, fix));
-
-  if (googleData?.found && googleData.address && googleData.phone) {
-    rawScore += 3; // Has baseline data
-    if (bingData?.rawScore >= 4) { rawScore += 2; f('good', 'NAP consistent', 'Name, address, and phone match across platforms.', '', ''); }
-    else { f('warning', 'Possible NAP inconsistencies', 'Your info may not match across all platforms.', 'Inconsistent NAP data hurts local search ranking.', 'Audit all your directory listings for consistency.'); }
-  } else {
-    f('warning', 'Cannot verify NAP consistency', 'Incomplete Google profile makes verification difficult.', '', 'Complete your Google Business Profile first.');
-  }
-
+  } catch { findings.push(F('BBB', 'warning', 'BBB check failed', '', '', '')); }
   return { rawScore, maxScore: 5, findings };
 }
 
-// ════════════════════════════════════════════════
-// 9. OVERALL SCORING ENGINE (100 pts)
-// ════════════════════════════════════════════════
-function calculateScore(platforms) {
-  const google = platforms.google?.rawScore || 0;    // /30
-  const website = platforms.website?.rawScore || 0;  // /25
-  const facebook = platforms.facebook?.rawScore || 0; // /15
-  const yelp = platforms.yelp?.rawScore || 0;        // /15
-  const bing = platforms.bing?.rawScore || 0;        // /5
-  const bbb = platforms.bbb?.rawScore || 0;          // /5
-  const nap = platforms.nap?.rawScore || 0;          // /5 (shares Other bucket)
-
-  const total = google + website + facebook + yelp + bing + bbb + nap;
-  const maxPossible = 30 + 25 + 15 + 15 + 5 + 5 + 5; // 100
-
-  return Math.round((total / maxPossible) * 100);
+// ══════════════════════════════════════
+// CHECK 8: COMPETITORS
+// ══════════════════════════════════════
+async function checkCompetitors(businessName, city, state, googleData) {
+  console.log(`[SCAN] Competitors: ${businessName}`);
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+  if (!apiKey || !googleData?.placeId) return { competitors: [], ranking: null };
+  try {
+    const type = googleData.types?.[0] || 'establishment';
+    const geoRes = await ax.get('https://maps.googleapis.com/maps/api/geocode/json', { params: { address: googleData.address || `${city}, ${state}`, key: apiKey } });
+    const loc = geoRes.data?.results?.[0]?.geometry?.location;
+    if (!loc) return { competitors: [], ranking: null };
+    let nearbyRes = await ax.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', { params: { location: `${loc.lat},${loc.lng}`, radius: 8000, type, key: apiKey } });
+    if ((nearbyRes.data?.results || []).length < 3) nearbyRes = await ax.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', { params: { location: `${loc.lat},${loc.lng}`, radius: 12000, keyword: type.replace(/_/g, ' '), key: apiKey } });
+    const competitors = (nearbyRes.data?.results || []).filter(p => p.place_id !== googleData.placeId && p.rating > 0).slice(0, 5).map(p => ({ name: p.name, rating: p.rating || 0, reviewCount: p.user_ratings_total || 0, address: p.vicinity || '' }));
+    const allBiz = [{ name: businessName, rating: googleData.rating, reviewCount: googleData.reviewCount }, ...competitors];
+    allBiz.sort((a, b) => (b.rating * 10 + Math.log(b.reviewCount + 1)) - (a.rating * 10 + Math.log(a.reviewCount + 1)));
+    const ranking = allBiz.findIndex(b => b.name === businessName) + 1;
+    return { competitors, ranking, totalInArea: allBiz.length };
+  } catch (e) { console.log(`[SCAN] Competitors: ${e.message}`); return { competitors: [], ranking: null }; }
 }
 
-function getScoreLabel(score) {
-  if (score >= 90) return 'Exceptional';
-  if (score >= 75) return 'Strong';
-  if (score >= 60) return 'Needs Work';
-  if (score >= 45) return 'Critical';
+// ══════════════════════════════════════
+// CHECK 9: VOICE SEARCH + AI VISIBILITY
+// ══════════════════════════════════════
+async function checkVoiceAndAI(businessName, city, state, googleData, bingData, yelpData, appleData) {
+  console.log(`[SCAN] Voice/AI: ${businessName}`);
+  const findings = [];
+  // Voice search readiness
+  const voiceFactors = [googleData?.found && googleData.hasHours && googleData.hasPhone, appleData?.rawScore >= 3, bingData?.rawScore >= 3, yelpData?.found, googleData?.rawScore >= 20];
+  const voicePct = Math.round((voiceFactors.filter(Boolean).length / voiceFactors.length) * 100);
+  const category = googleData?.types?.[0]?.replace(/_/g, ' ') || 'business';
+
+  if (voicePct < 60) findings.push(F('Voice Search', 'warning', `${voicePct}% voice search ready`, `When someone says "Hey Siri, find a ${category} near me" — you may not appear.`, '', 'Complete your profiles on Google, Apple Maps, Bing, and Yelp.'));
+  else findings.push(F('Voice Search', 'good', `${voicePct}% voice search ready`, '', '', ''));
+
+  // AI visibility via Gemini
+  let appearsInAI = false;
+  const aiRes = await askGemini(`Search for "best ${category} in ${city} ${state}". Does "${businessName}" appear? List businesses mentioned. Brief answer.`, 8000);
+  if (aiRes && aiRes.toLowerCase().includes(businessName.toLowerCase().split(' ')[0])) {
+    appearsInAI = true;
+    findings.push(F('AI Visibility', 'good', 'Appears in AI search results', `When customers ask AI about ${category} in ${city}, you are mentioned.`, '', ''));
+  } else {
+    findings.push(F('AI Visibility', 'warning', 'Not appearing in AI search', `AI assistants don't mention ${businessName} when asked about ${category} in ${city}.`, 'AI-powered search is growing rapidly.', 'Improve your overall online presence to appear in AI results.'));
+  }
+
+  return { voicePct, appearsInAI, findings };
+}
+
+// ══════════════════════════════════════
+// CHECK 10: INDUSTRY DIRECTORIES
+// ══════════════════════════════════════
+async function checkIndustryDirs(businessName, city, state, googleTypes) {
+  console.log(`[SCAN] Industry dirs: ${businessName}`);
+  const findings = [];
+  const category = (googleTypes || [])[0] || '';
+  const dirMap = {
+    plumber: ['HomeAdvisor', 'Angi', 'Thumbtack'], electrician: ['HomeAdvisor', 'Angi', 'Thumbtack'], hvac: ['HomeAdvisor', 'Angi'],
+    restaurant: ['OpenTable', 'DoorDash', 'Grubhub'], dentist: ['Healthgrades', 'ZocDoc'], doctor: ['Healthgrades', 'ZocDoc'],
+    lawyer: ['Avvo', 'FindLaw'], home_goods_store: ['Houzz'], beauty_salon: ['StyleSeat', 'Vagaro'], hair_care: ['StyleSeat', 'Vagaro'],
+    car_repair: ['CarGurus'], gym: ['ClassPass'], veterinary_care: ['PetFinder'],
+  };
+  const dirs = dirMap[category] || ['Angi', 'Thumbtack'];
+  if (dirs.length > 0) {
+    const g = await askGemini(`Is "${businessName}" in ${city}, ${state} listed on these directories: ${dirs.join(', ')}? For each, say "listed" or "not listed". Brief answer.`, 8000);
+    if (g) {
+      const notListed = dirs.filter(d => g.toLowerCase().includes(d.toLowerCase()) && g.toLowerCase().includes('not listed'));
+      const listed = dirs.filter(d => !notListed.includes(d) && g.toLowerCase().includes(d.toLowerCase()));
+      if (listed.length > 0) findings.push(F('Directories', 'good', `Found on ${listed.join(', ')}`, '', '', ''));
+      if (notListed.length > 0) findings.push(F('Directories', 'warning', `Not on ${notListed.join(', ')}`, 'Missing from industry-specific directories.', '', `Register on ${notListed[0]} to reach more customers.`));
+    }
+  }
+  return { findings };
+}
+
+// ══════════════════════════════════════
+// SCORING ENGINE (100pts)
+// ══════════════════════════════════════
+function calculateScore(p) {
+  return Math.round(
+    (p.google?.rawScore || 0) + // /30
+    (p.website?.rawScore || 0) + // /25
+    (p.facebook?.rawScore || 0) + // /15
+    (p.yelp?.rawScore || 0) + // /15
+    (p.bing?.rawScore || 0) + // /5
+    (p.apple?.rawScore || 0) + // /5
+    (p.bbb?.rawScore || 0) // /5
+  ); // max 100
+}
+
+function getScoreLabel(s) {
+  if (s >= 90) return 'Exceptional';
+  if (s >= 75) return 'Strong';
+  if (s >= 60) return 'Needs Work';
+  if (s >= 45) return 'Critical';
   return 'Emergency';
 }
 
-// ════════════════════════════════════════════════
-// 10. AI INSIGHTS (Claude Haiku)
-// ════════════════════════════════════════════════
-async function generateInsights(businessName, city, state, platforms, overallScore, extra = {}) {
-  if (!process.env.ANTHROPIC_API_KEY) return { summary: '', topPriorities: [], industryContext: '', monthlyGoal: '' };
-
+// ══════════════════════════════════════
+// AI INSIGHTS (Claude Haiku)
+// ══════════════════════════════════════
+async function generateInsights(businessName, city, state, platforms, overallScore, extra) {
+  if (!process.env.ANTHROPIC_API_KEY) return { executiveSummary: '', topPriorities: [], competitorIntel: '', quickWins: [], monthlyGoal: '', revenueImpact: '' };
+  const p = platforms;
   const comp = extra.competitors;
-  const prompt = `You are a senior digital marketing consultant writing a paid $149 audit report for a local business. Be specific, direct, and actionable.
+  const prompt = `You are a senior digital marketing consultant writing a premium $149 audit. Be specific, data-driven, no fluff.
 
 BUSINESS: ${businessName}, ${city}${state ? ', ' + state : ''}${extra.industry ? ' (' + extra.industry + ')' : ''}
-OVERALL SCORE: ${overallScore}/100 — ${getScoreLabel(overallScore)}
+SCORE: ${overallScore}/100 — ${getScoreLabel(overallScore)}
 
-PLATFORM SCORES:
-- Google Business Profile: ${platforms.google?.rawScore || 0}/30 — Rating ${platforms.google?.rating || 'N/A'} (${platforms.google?.reviewCount || 0} reviews)
-- Website: ${platforms.website?.rawScore || 0}/25 — Speed ${platforms.website?.perfScore || 'N/A'}/100, SSL: ${platforms.website?.hasSSL ? 'Yes' : 'No'}
-- Facebook: ${platforms.facebook?.rawScore || 0}/15 — ${platforms.facebook?.found ? 'Found' : 'NOT FOUND'}${platforms.facebook?.followers ? ', ' + platforms.facebook.followers + ' followers' : ''}
-- Yelp: ${platforms.yelp?.rawScore || 0}/15 — ${platforms.yelp?.found ? platforms.yelp.rating + ' stars, ' + platforms.yelp.reviewCount + ' reviews' : 'NOT FOUND'}
-- Bing: ${platforms.bing?.rawScore || 0}/5
-- BBB: ${platforms.bbb?.rawScore || 0}/5
-- NAP: ${platforms.nap?.rawScore || 0}/5
+PLATFORMS:
+Google: ${p.google?.rawScore||0}/30 — ${p.google?.rating||'N/A'}★ (${p.google?.reviewCount||0} reviews), response rate ${p.google?.responseRate||0}%
+Website: ${p.website?.rawScore||0}/25 — SSL:${p.website?.hasSSL?'Y':'N'}, Speed:${p.website?.perfScore||'?'}/100
+Facebook: ${p.facebook?.rawScore||0}/15 — ${p.facebook?.found?'Found':'NOT FOUND'}${p.facebook?.followers?', '+p.facebook.followers+' followers':''}
+Yelp: ${p.yelp?.rawScore||0}/15 — ${p.yelp?.found?p.yelp.rating+'★ '+p.yelp.reviewCount+' reviews':'NOT FOUND'}
+Bing: ${p.bing?.rawScore||0}/5 | Apple: ${p.apple?.rawScore||0}/5 | BBB: ${p.bbb?.rawScore||0}/5
+Voice Search: ${extra.voicePct||'?'}% ready | AI Visibility: ${extra.appearsInAI?'YES':'NO'}
+${comp?.competitors?.length ? `Competitors: ${comp.competitors.map((c,i) => `${i+1}. ${c.name} ${c.rating}★ ${c.reviewCount}r`).join(', ')} | Rank: #${comp.ranking||'?'}/${comp.totalInArea||'?'}` : ''}
+${extra.biggestChallenge ? `Owner challenge: "${extra.biggestChallenge}"` : ''}
 
-${comp?.competitors?.length ? `COMPETITORS:\n${comp.competitors.map((c, i) => `${i + 1}. ${c.name} — ${c.rating} stars, ${c.reviewCount} reviews`).join('\n')}\nThis business ranks #${comp.ranking || '?'} of ${comp.totalInArea || '?'} in the area.` : ''}
-
-${extra.biggestChallenge ? `Owner\'s biggest challenge: "${extra.biggestChallenge}"` : ''}
-
-Generate JSON:
-{
-  "summary": "2-3 sentences. Specific to THIS business. Include score and what it means.",
-  "topPriorities": [
-    {"priority":1,"title":"action title","description":"specific steps with ROI context","impact":"high","effort":"easy"},
-    {"priority":2,"title":"action title","description":"specific steps","impact":"high","effort":"medium"},
-    {"priority":3,"title":"action title","description":"specific steps","impact":"medium","effort":"easy"}
-  ],
-  "industryContext": "How this score compares to similar businesses",
-  "monthlyGoal": "One specific measurable goal for this month",
-  "revenueImpact": "Estimated customer/revenue impact of fixing top issues"
-}
-Return ONLY valid JSON.`;
+Return JSON:
+{"executiveSummary":"2-3 sentences with actual numbers","revenueImpact":"specific $ estimate based on industry avg ticket","topPriorities":[{"priority":1,"title":"action","description":"specific steps","timeToComplete":"X days","expectedImpact":"outcome","difficulty":"easy/medium/hard","estimatedROI":"$/mo"},{"priority":2,"title":"...","description":"...","timeToComplete":"...","expectedImpact":"...","difficulty":"...","estimatedROI":"..."},{"priority":3,"title":"...","description":"...","timeToComplete":"...","expectedImpact":"...","difficulty":"...","estimatedROI":"..."}],"competitorIntel":"what competitors do that this business doesn't","quickWins":["3 free fixes today"],"monthlyGoal":"one measurable goal"}
+ONLY valid JSON.`;
 
   try {
-    const res = await axios.post('https://api.anthropic.com/v1/messages', { model: 'claude-haiku-4-5-20251001', max_tokens: 1200, messages: [{ role: 'user', content: prompt }] },
-      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 15000 });
+    const res = await axios.post('https://api.anthropic.com/v1/messages', { model: 'claude-haiku-4-5-20251001', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] },
+      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 20000 });
     const text = res.data?.content?.[0]?.text || '';
-    const match = text.match(/\{[\s\S]*\}/);
-    return match ? JSON.parse(match[0]) : { summary: text, topPriorities: [], industryContext: '', monthlyGoal: '' };
-  } catch (e) { console.error('[SCAN] AI insights failed:', e.message); return { summary: '', topPriorities: [], industryContext: '', monthlyGoal: '' }; }
+    const m = text.match(/\{[\s\S]*\}/);
+    return m ? JSON.parse(m[0]) : { executiveSummary: text, topPriorities: [], quickWins: [], monthlyGoal: '', revenueImpact: '', competitorIntel: '' };
+  } catch (e) { console.error('[SCAN] AI:', e.message); return { executiveSummary: '', topPriorities: [], quickWins: [], monthlyGoal: '', revenueImpact: '', competitorIntel: '' }; }
 }
 
-// ════════════════════════════════════════════════
-// MAIN SCAN FUNCTIONS
-// ════════════════════════════════════════════════
-async function runFullScan({ businessName, city, state, website, facebookUrl, address, phone, industry, biggestChallenge, yearsInBusiness }) {
-  console.log(`[SCAN] ═══ FULL SCAN: ${businessName}, ${city}, ${state} ═══`);
-  const startTime = Date.now();
+// ══════════════════════════════════════
+// FULL SCAN
+// ══════════════════════════════════════
+async function runFullScan({ businessName, city, state, website, facebookUrl, industry, biggestChallenge }) {
+  console.log(`[SCAN] ═══ FULL 12-PLATFORM AUDIT: ${businessName}, ${city} ═══`);
+  const t0 = Date.now();
 
   // Google is required
   let googleData;
   try { googleData = await checkGoogle(businessName, city, state); }
-  catch (e) { console.error('[SCAN] Google FAILED:', e.message); return { error: 'Google check failed.', businessName, city, state, scannedAt: new Date().toISOString() }; }
+  catch (e) { console.error('[SCAN] Google CRASH:', e.message); return { error: 'Google check failed.', businessName, city, state, scannedAt: new Date().toISOString() }; }
 
   const siteUrl = website || googleData.website || null;
 
-  // Run all other checks in parallel
-  const [websiteResult, facebookResult, yelpResult, bingResult, bbbResult, competitorResult] = await Promise.allSettled([
-    checkWebsite(siteUrl).catch(e => { console.error('[SCAN] Website:', e.message); return { found: false, rawScore: 0, maxScore: 25, score: 0, findings: [] }; }),
-    checkFacebook(businessName, city, state, facebookUrl).catch(e => { console.error('[SCAN] Facebook:', e.message); return { found: false, rawScore: 0, maxScore: 15, score: 0, findings: [] }; }),
-    checkYelp(businessName, city, state).catch(e => { console.error('[SCAN] Yelp:', e.message); return { found: false, rawScore: 0, maxScore: 15, score: 0, findings: [] }; }),
-    checkBing(businessName, city, state, googleData.phone).catch(e => { console.error('[SCAN] Bing:', e.message); return { rawScore: 0, maxScore: 5, findings: [] }; }),
-    checkBBB(businessName, city, state).catch(e => { console.error('[SCAN] BBB:', e.message); return { rawScore: 0, maxScore: 5, findings: [] }; }),
-    checkCompetitors(businessName, city, state, googleData).catch(e => { console.error('[SCAN] Competitors:', e.message); return { competitors: [], ranking: null }; }),
+  // Parallel checks
+  const [webR, fbR, yelpR, bingR, appleR, bbbR, compR] = await Promise.allSettled([
+    checkWebsite(siteUrl).catch(e => ({ found: false, rawScore: 0, maxScore: 25, score: 0, findings: [] })),
+    checkFacebook(businessName, city, state, facebookUrl).catch(e => ({ found: false, rawScore: 0, maxScore: 15, score: 0, findings: [] })),
+    checkYelp(businessName, city, state).catch(e => ({ found: false, rawScore: 0, maxScore: 15, score: 0, findings: [] })),
+    checkBing(businessName, city, state, googleData.phone).catch(e => ({ rawScore: 0, maxScore: 5, findings: [] })),
+    checkAppleMaps(businessName, city, state).catch(e => ({ rawScore: 0, maxScore: 5, findings: [] })),
+    checkBBB(businessName, city, state).catch(e => ({ rawScore: 0, maxScore: 5, findings: [] })),
+    checkCompetitors(businessName, city, state, googleData).catch(e => ({ competitors: [], ranking: null })),
   ]);
 
-  const val = (r) => r.status === 'fulfilled' ? r.value : r.value || {};
-  const websiteData = val(websiteResult);
-  const facebookData = val(facebookResult);
-  const yelpData = val(yelpResult);
-  const bingData = val(bingResult);
-  const bbbData = val(bbbResult);
-  const competitorData = val(competitorResult);
-  const napData = await checkNAP(googleData, bingData).catch(() => ({ rawScore: 0, maxScore: 5, findings: [] }));
+  const v = r => r.status === 'fulfilled' ? r.value : (r.reason ? {} : {});
+  const websiteData = v(webR), facebookData = v(fbR), yelpData = v(yelpR), bingData = v(bingR), appleData = v(appleR), bbbData = v(bbbR), competitorData = v(compR);
 
-  const platforms = { google: googleData, website: websiteData, facebook: facebookData, yelp: yelpData, bing: bingData, bbb: bbbData, nap: napData };
+  // Sequential checks
+  const voiceAI = await checkVoiceAndAI(businessName, city, state, googleData, bingData, yelpData, appleData).catch(() => ({ voicePct: 0, appearsInAI: false, findings: [] }));
+  const industryDirs = await checkIndustryDirs(businessName, city, state, googleData.types).catch(() => ({ findings: [] }));
+
+  const platforms = { google: googleData, website: websiteData, facebook: facebookData, yelp: yelpData, bing: bingData, apple: appleData, bbb: bbbData };
   const overallScore = calculateScore(platforms);
   const scoreLabel = getScoreLabel(overallScore);
 
-  const insights = await generateInsights(businessName, city, state, platforms, overallScore, { industry, biggestChallenge, yearsInBusiness, phone, address, competitors: competitorData });
+  const insights = await generateInsights(businessName, city, state, platforms, overallScore, { industry, biggestChallenge, competitors: competitorData, voicePct: voiceAI.voicePct, appearsInAI: voiceAI.appearsInAI });
 
-  const sevOrder = { critical: 0, warning: 1, good: 2 };
+  const sev = { critical: 0, warning: 1, good: 2 };
   const allFindings = [
     ...(googleData.findings || []), ...(websiteData.findings || []), ...(facebookData.findings || []),
-    ...(yelpData.findings || []), ...(bingData.findings || []), ...(bbbData.findings || []), ...(napData.findings || []),
-  ].sort((a, b) => (sevOrder[a.severity] ?? 9) - (sevOrder[b.severity] ?? 9));
+    ...(yelpData.findings || []), ...(bingData.findings || []), ...(appleData.findings || []),
+    ...(bbbData.findings || []), ...(voiceAI.findings || []), ...(industryDirs.findings || []),
+  ].sort((a, b) => (sev[a.severity] ?? 9) - (sev[b.severity] ?? 9));
 
-  const platformsFound = [googleData, websiteData, facebookData, yelpData].filter(p => p.found).length;
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`[SCAN] ═══ COMPLETE in ${elapsed}s. Score: ${overallScore}/100 (${scoreLabel}). Findings: ${allFindings.length}. Platforms: ${platformsFound}/7 ═══`);
+  const platformsFound = [googleData, websiteData, facebookData, yelpData].filter(p => p?.found).length;
+  const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log(`[SCAN] ═══ DONE in ${elapsed}s. Score: ${overallScore}/100. Findings: ${allFindings.length}. Platforms: ${platformsFound}/7 ═══`);
 
   return {
     businessName, city, state, scannedAt: new Date().toISOString(),
-    overallScore, scoreLabel,
-    platforms, competitors: competitorData,
+    overallScore, scoreLabel, platforms, competitors: competitorData,
+    voiceSearch: { readiness: voiceAI.voicePct, appearsInAI: voiceAI.appearsInAI },
     allFindings,
-    topPriorities: insights.topPriorities || [], summary: insights.summary || '',
-    industryContext: insights.industryContext || '', monthlyGoal: insights.monthlyGoal || '',
-    revenueImpact: insights.revenueImpact || '',
+    summary: insights.executiveSummary || '', revenueImpact: insights.revenueImpact || '',
+    topPriorities: insights.topPriorities || [], competitorIntel: insights.competitorIntel || '',
+    quickWins: insights.quickWins || [], monthlyGoal: insights.monthlyGoal || '',
     confidence: platformsFound >= 3 ? 'high' : platformsFound >= 2 ? 'medium' : 'low',
-    dataQuality: { platformsFound, platformsChecked: 7, note: platformsFound >= 5 ? 'Comprehensive multi-platform data' : platformsFound >= 3 ? 'Good coverage — some platforms missing' : 'Limited data — results may be incomplete' },
+    dataQuality: { platformsFound, platformsChecked: 7, scanTime: elapsed, note: platformsFound >= 5 ? 'Comprehensive data' : platformsFound >= 3 ? 'Good coverage' : 'Limited data' },
   };
 }
 
+// ══════════════════════════════════════
+// TEASER SCAN (under 5 seconds, under $0.03)
+// ══════════════════════════════════════
 async function runTeaserScan({ businessName, city, state }) {
-  console.log(`[SCAN] Teaser: ${businessName}, ${city}, ${state}`);
+  console.log(`[SCAN] Teaser: ${businessName}, ${city}`);
   try {
-    const googleData = await checkGoogle(businessName, city, state);
-    const g = googleData;
+    const g = await checkGoogle(businessName, city, state);
 
-    // Simple teaser score (100 pts)
+    // Teaser scoring (100pts, Google only)
     let tScore = 0;
-    if (g.rating >= 4.5) tScore += 25; else if (g.rating >= 4.0) tScore += 18; else if (g.rating >= 3.5) tScore += 10; else if (g.rating > 0) tScore += 5;
-    if (g.reviewCount >= 100) tScore += 20; else if (g.reviewCount >= 50) tScore += 14; else if (g.reviewCount >= 20) tScore += 8; else tScore += 3;
-    const profileComplete = [g.hasHours, !!g.phone, g.hasWebsite, !!g.address].filter(Boolean).length;
-    if (profileComplete === 4) tScore += 20; else if (profileComplete === 3) tScore += 14; else if (profileComplete === 2) tScore += 8; else tScore += 3;
-    if (g.hasWebsite) tScore += 15;
-    if (g.photoCount >= 10) tScore += 10; else if (g.photoCount >= 5) tScore += 7; else if (g.photoCount > 0) tScore += 3;
-    const recentReview = g.reviews?.[0]?.time ? (Date.now() / 1000 - g.reviews[0].time) < 90 * 86400 : false;
-    if (recentReview) tScore += 10; else tScore += 3;
+    // Rating (25pts)
+    if (g.rating >= 4.8) tScore += 25; else if (g.rating >= 4.5) tScore += 20; else if (g.rating >= 4.0) tScore += 14; else if (g.rating >= 3.5) tScore += 8; else if (g.rating > 0) tScore += 3;
+    // Review count (25pts)
+    if (g.reviewCount >= 500) tScore += 25; else if (g.reviewCount >= 200) tScore += 20; else if (g.reviewCount >= 100) tScore += 15; else if (g.reviewCount >= 50) tScore += 10; else if (g.reviewCount >= 20) tScore += 6; else if (g.reviewCount > 0) tScore += 2;
+    // Profile complete (25pts)
+    if (g.hasHours) tScore += 5; if (g.hasWebsite) tScore += 5; if (g.hasPhone) tScore += 5; if (g.photoCount >= 10) tScore += 5; if (g.hasDescription) tScore += 5;
+    // Recent activity (15pts)
+    if (g.daysSinceReview <= 30) tScore += 15; else if (g.daysSinceReview <= 90) tScore += 10; else if (g.daysSinceReview <= 180) tScore += 5;
+    // Status (10pts)
+    if (g.businessStatus === 'OPERATIONAL') tScore += 10;
     tScore = Math.min(tScore, 100);
 
-    // Pick 3 worst findings
+    // Worst 3 findings
     const tFindings = (g.findings || []).filter(f => f.severity !== 'good').slice(0, 3);
-    if (tFindings.length === 0 && g.reviewCount < 50) tFindings.push(finding('Google', 'warning', `${g.reviewCount} reviews — room to grow`, 'More reviews improve ranking.', '', ''));
+    if (tFindings.length === 0 && g.reviewCount < 50) tFindings.push(F('Google', 'warning', `${g.reviewCount} reviews — competitors may have more`, '', '', ''));
 
-    // Quick competitor peek
+    // Top competitor peek
     let topCompetitor = null;
     try {
       const apiKey = process.env.GOOGLE_PLACES_API_KEY;
       if (apiKey && g.address) {
-        const geoRes = await ax.get('https://maps.googleapis.com/maps/api/geocode/json', { params: { address: g.address, key: apiKey }, timeout: 5000 });
+        const geoRes = await ax.get('https://maps.googleapis.com/maps/api/geocode/json', { params: { address: g.address, key: apiKey }, timeout: 4000 });
         const loc = geoRes.data?.results?.[0]?.geometry?.location;
         if (loc) {
           const type = g.types?.[0] || 'establishment';
-          const nearRes = await ax.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', { params: { location: `${loc.lat},${loc.lng}`, radius: 8000, type, key: apiKey }, timeout: 5000 });
+          const nearRes = await ax.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', { params: { location: `${loc.lat},${loc.lng}`, radius: 8000, type, key: apiKey }, timeout: 4000 });
           const comp = (nearRes.data?.results || []).filter(p => p.place_id !== g.placeId && p.rating > 0).sort((a, b) => (b.user_ratings_total || 0) - (a.user_ratings_total || 0));
           if (comp[0]) topCompetitor = { name: comp[0].name, rating: comp[0].rating, reviewCount: comp[0].user_ratings_total || 0 };
         }
       }
     } catch {}
 
-    // Rep talking points
-    const talkingPoints = [];
-    talkingPoints.push(`Your Google score is ${tScore} out of 100.`);
-    if (g.reviewCount < 50 && topCompetitor) talkingPoints.push(`You have ${g.reviewCount} reviews — your top competitor ${topCompetitor.name} has ${topCompetitor.reviewCount}. That gap is costing you customers.`);
-    else if (g.reviewCount < 50) talkingPoints.push(`You only have ${g.reviewCount} reviews. Most successful businesses in your area have 50+.`);
-    if (g.rating > 0 && g.rating < 4.5) talkingPoints.push(`Your ${g.rating}-star rating is below the 4.5 threshold where customers feel confident calling.`);
-    if (!g.hasWebsite) talkingPoints.push(`You don't have a website linked to your Google profile. Customers can't learn more about you.`);
-    if (g.photoCount < 5) talkingPoints.push(`Your profile only has ${g.photoCount} photos. Businesses with 10+ get 42% more direction requests.`);
+    // Talking points via Gemini
+    let talkingPoints = [];
+    try {
+      const findingsList = tFindings.map(f => f.title).join('. ');
+      const compLine = topCompetitor ? `Top competitor: ${topCompetitor.name} with ${topCompetitor.reviewCount} reviews and ${topCompetitor.rating} stars.` : '';
+      const tpRes = await askGemini(`Generate 3 short sales talking points for a consultant showing this Google audit to a business owner. Score: ${tScore}/100. Findings: ${findingsList}. ${compLine} Make them conversational, urgent, specific. Each under 20 words. Return as JSON array of 3 strings.`, 6000);
+      if (tpRes) { try { talkingPoints = JSON.parse(tpRes.match(/\[[\s\S]*\]/)?.[0] || '[]'); } catch { talkingPoints = [tpRes]; } }
+    } catch {}
 
     return {
-      businessName, city, state, scannedAt: new Date().toISOString(),
+      type: 'teaser', teaser: true,
+      businessName: g.name || businessName, city, state,
+      scannedAt: new Date().toISOString(),
       preliminaryScore: tScore, scoreLabel: getScoreLabel(tScore),
-      teaser: true, checksShown: 4, totalChecks: 47,
-      google: googleData, topCompetitor,
-      findings: tFindings, talkingPoints,
-      note: 'Preliminary scan — Google only. Full audit checks 7 platforms.',
+      rating: g.rating, reviewCount: g.reviewCount,
+      hasWebsite: g.hasWebsite, hasHours: g.hasHours, hasPhone: g.hasPhone,
+      photoCount: g.photoCount, recentReview: g.daysSinceReview <= 90,
+      address: g.address, phone: g.phone, website: g.website,
+      categories: g.types, google: g,
+      findings: tFindings, topCompetitor, talkingPoints,
+      checksShown: 5, totalChecks: 47,
+      note: 'Preliminary scan showing 5 of 47 checks. Full audit reveals Facebook, Yelp, Bing, BBB, Apple Maps, competitor ads, and more.',
     };
-  } catch (e) { console.error('[SCAN] Teaser failed:', e.message); return { error: 'Scan failed.', businessName, city, state }; }
+  } catch (e) { console.error('[SCAN] Teaser CRASH:', e.message); return { error: 'Scan failed.', businessName, city, state }; }
 }
 
 module.exports = { runFullScan, runTeaserScan };
