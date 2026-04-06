@@ -1,7 +1,7 @@
 const axios = require('axios');
 const { queryOne } = require('../db');
 const { requireAuth } = require('../middleware/auth');
-const { runFullScan, runTeaserScan } = require('../services/scanEngine');
+const { runFullScan, runLightScan } = require('../services/scanEngine');
 
 // Simple in-memory rate limiter for teaser scans
 const rateLimitMap = new Map();
@@ -48,7 +48,7 @@ async function scanRoutes(fastify) {
     console.log(`[SCAN ROUTE] Teaser scan request: ${businessName}, ${city}, ${state || ''}`);
 
     try {
-      const result = await runTeaserScan({ businessName, city, state: state || '' });
+      const result = await runLightScan({ businessName, city, state: state || '' });
       if (result.error) return reply.status(500).send({ error: result.error });
       return reply.send(result);
     } catch (err) {
@@ -190,7 +190,7 @@ async function scanRoutes(fastify) {
     const { businessName, city, state } = request.body || {};
     if (!businessName) return reply.status(400).send({ error: 'businessName required' });
     try {
-      const result = await runTeaserScan({ businessName, city: city || '', state: state || '' });
+      const result = await runLightScan({ businessName, city: city || '', state: state || '' });
       return reply.send(result);
     } catch (err) {
       console.error('[SCAN] Pre-scan failed:', err.message);
