@@ -232,6 +232,18 @@ async function auditRoutes(fastify) {
     }
   });
 
+  // TEMPORARY DEBUG — shows audit + scan data for debugging
+  fastify.get("/api/audits/:id/debug", async (request, reply) => {
+    try {
+      const audit = await queryOne("SELECT id, paid, status, business_name, email, overall_score, created_at, updated_at FROM audits WHERE id = $1", [request.params.id]);
+      if (!audit) return reply.status(404).send({ error: "Audit not found" });
+      const scan = await queryOne("SELECT id, overall_score, confidence, scanned_at FROM scan_results WHERE audit_id = $1 ORDER BY id DESC LIMIT 1", [request.params.id]);
+      return reply.send({ audit, scan_result: scan || null });
+    } catch (err) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
   // TEMPORARY TEST ROUTE — remove after webhook is verified
   fastify.patch("/api/audits/:id/force-paid", async (request, reply) => {
     try {

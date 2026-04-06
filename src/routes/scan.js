@@ -56,19 +56,23 @@ async function scanRoutes(fastify) {
 
   // ── FULL SCAN (requires paid audit) ──
   fastify.post('/api/scan/full', async (request, reply) => {
+    console.log('[FULL SCAN] Request received:', JSON.stringify({ auditId: request.body?.auditId, businessName: request.body?.businessName, city: request.body?.city }));
     const { businessName, city, state, website, facebookUrl, auditId, address, phone, industry, biggestChallenge, yearsInBusiness, googleProfileUrl, yelpUrl } = request.body || {};
 
     if (!businessName || !city) {
+      console.log('[FULL SCAN] Missing businessName or city');
       return reply.status(400).send({ error: 'businessName and city are required' });
     }
     if (!auditId) {
+      console.log('[FULL SCAN] Missing auditId');
       return reply.status(400).send({ error: 'auditId is required for full scan' });
     }
 
     // Verify payment
     const audit = await queryOne('SELECT id, paid, status FROM audits WHERE id = $1', [auditId]);
+    console.log('[FULL SCAN] Audit lookup:', audit ? `id=${audit.id} paid=${audit.paid} status=${audit.status}` : 'NOT FOUND');
     if (!audit) return reply.status(404).send({ error: 'Audit not found' });
-    if (!audit.paid) return reply.status(402).send({ error: 'Payment required for full scan' });
+    if (!audit.paid) { console.log('[FULL SCAN] BLOCKED — audit not paid'); return reply.status(402).send({ error: 'Payment required for full scan' }); }
 
     console.log(`[SCAN ROUTE] Full scan request: ${businessName}, ${city}, ${state || ''} (audit ${auditId})`);
 
@@ -123,7 +127,7 @@ async function scanRoutes(fastify) {
 
       return reply.send(result);
     } catch (err) {
-      console.error('[SCAN ROUTE] Full scan error:', err.message);
+      console.error('[FULL SCAN] CRASH:', err.message, err.stack);
       await queryOne('UPDATE audits SET status = $1, updated_at = NOW() WHERE id = $2', ['failed', auditId]).catch(() => null);
       return reply.status(500).send({ error: 'Scan failed. Please try again.' });
     }
