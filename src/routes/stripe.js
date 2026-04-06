@@ -12,10 +12,18 @@ function getFrontendUrl() {
   return (process.env.FRONTEND_URL || "").replace(/\/+$/, "");
 }
 
+const AUDIT_TIERS = {
+  online: { amount: 3999, name: "Online Presence Audit — Full Report", consultantEarns: 0, youKeep: 3999 },
+  basic: { amount: 9900, name: "Online Presence Audit — Basic", consultantEarns: 4900, youKeep: 5000 },
+  standard: { amount: 12900, name: "Online Presence Audit — Standard", consultantEarns: 6400, youKeep: 6500 },
+  premium: { amount: 14900, name: "Online Presence Audit — Premium", consultantEarns: 7400, youKeep: 7500 },
+};
+
 async function stripeRoutes(fastify) {
   fastify.post("/api/stripe/checkout", async (request, reply) => {
     try {
-      const { audit_id, email, customer_name, rep_code } = request.body || {};
+      const { audit_id, email, customer_name, rep_code, tier } = request.body || {};
+      const selectedTier = AUDIT_TIERS[tier] || AUDIT_TIERS.online;
 
       if (!audit_id || !email) {
         return reply.status(400).send({ error: "audit_id and email are required" });
@@ -35,6 +43,7 @@ async function stripeRoutes(fastify) {
           audit_id: String(audit_id),
           customer_name: customer_name || "",
           product: "one_time_audit",
+          tier: tier || "online",
           rep_code: rep_code || "",
         },
         payment_intent_data: {
@@ -42,6 +51,7 @@ async function stripeRoutes(fastify) {
             audit_id: String(audit_id),
             customer_name: customer_name || "",
             product: "one_time_audit",
+            tier: tier || "online",
             rep_code: rep_code || "",
           },
         },
@@ -50,10 +60,10 @@ async function stripeRoutes(fastify) {
             price_data: {
               currency: "usd",
               product_data: {
-                name: "Online Presence Audit — Full Report",
+                name: selectedTier.name,
                 description: "Complete online presence analysis and action plan",
               },
-              unit_amount: 3999,
+              unit_amount: selectedTier.amount,
             },
             quantity: 1,
           },
@@ -197,7 +207,7 @@ async function stripeRoutes(fastify) {
                   `INSERT INTO rep_commissions (rep_id, audit_id, customer_email, customer_name, business_name, product_type, sale_amount, commission_amount, status, payment_status, buffer_release_date, buffer_status)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW() + INTERVAL '7 days', $11)`,
                   [rep.id, auditId, audit?.email || session.customer_email, audit?.customer_name || session.metadata?.customer_name || null,
-                   audit?.business_name || null, product, amountPaid, parseFloat(rep.commission_audit) || 60, 'pending', 'customer_paid', 'buffering']
+                   audit?.business_name || null, product, amountPaid, (AUDIT_TIERS[session.metadata?.tier]?.consultantEarns || parseFloat(rep.commission_audit) * 100 || 6000) / 100, 'pending', 'customer_paid', 'buffering']
                 );
                 console.log(`[REP] Commission created for rep ${repCode}: $${rep.commission_audit} on audit ${auditId}`);
 
