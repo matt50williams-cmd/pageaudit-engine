@@ -50,8 +50,8 @@ async function stripeRoutes(fastify) {
             price_data: {
               currency: "usd",
               product_data: {
-                name: "Facebook Page Audit — Full Report",
-                description: "Custom PageAudit Pro report and action plan",
+                name: "Online Presence Audit — Full Report",
+                description: "Complete online presence analysis and action plan",
               },
               unit_amount: 3999,
             },
