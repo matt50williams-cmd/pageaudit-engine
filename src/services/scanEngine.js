@@ -43,6 +43,36 @@ async function askGemini(prompt, timeout = 10000) {
   } catch (e) { console.log(`[GEMINI] ${e.message}`); return null; }
 }
 
+// ── OUTSCRAPER ──
+async function outscraperSearch(query) {
+  const key = process.env.OUTSCRAPER_API_KEY;
+  if (!key) { console.log('[OUTSCRAPER] No API key'); return null; }
+  try {
+    const res = await ax.get('https://api.app.outscraper.com/maps/search-v3', {
+      params: { query, limit: 1, async: false, language: 'en', region: 'us', fields: 'name,place_id,full_address,phone,site,rating,reviews,working_hours,business_status,type,subtypes,description,photos_count,facebook,instagram,twitter,linkedin,youtube,yelp' },
+      headers: { 'X-API-KEY': key }, timeout: 30000,
+    });
+    const data = res.data?.data?.[0]?.[0] || res.data?.data?.[0] || null;
+    if (data) console.log(`[OUTSCRAPER] Found: ${data.name} | FB: ${data.facebook || 'none'} | Yelp: ${data.yelp || 'none'} | IG: ${data.instagram || 'none'}`);
+    else console.log('[OUTSCRAPER] No results');
+    return data;
+  } catch (e) { console.log(`[OUTSCRAPER] Error: ${e.message}`); return null; }
+}
+
+async function outscraperContacts(domain) {
+  const key = process.env.OUTSCRAPER_API_KEY;
+  if (!key) return null;
+  try {
+    const res = await ax.get('https://api.app.outscraper.com/emails-and-contacts', {
+      params: { query: domain, async: false },
+      headers: { 'X-API-KEY': key }, timeout: 20000,
+    });
+    const data = res.data?.data?.[0] || null;
+    if (data) console.log(`[OUTSCRAPER CONTACTS] FB: ${data.socials?.facebook || 'none'} | IG: ${data.socials?.instagram || 'none'}`);
+    return data;
+  } catch (e) { console.log(`[OUTSCRAPER CONTACTS] ${e.message}`); return null; }
+}
+
 // ══════════════════════════════════════
 // CHECK 1: GOOGLE BUSINESS PROFILE (30pts)
 // ══════════════════════════════════════
@@ -210,9 +240,11 @@ async function checkWebsite(websiteUrl) {
 // ══════════════════════════════════════
 // CHECK 3: FACEBOOK (15pts)
 // ══════════════════════════════════════
-async function checkFacebook(businessName, city, state, facebookUrl) {
+async function checkFacebook(businessName, city, state, facebookUrl, outscraperData) {
   console.log(`[SCAN] Facebook: ${businessName} ${city}`);
-  let fbUrl = facebookUrl || null;
+  // Outscraper URL is most reliable — skip search if we have it
+  let fbUrl = facebookUrl || outscraperData?.facebook || null;
+  if (fbUrl) console.log(`[FB] Using Outscraper URL: ${fbUrl}`);
   if (!fbUrl) {
     const g = await askGemini(`Find the official Facebook business page URL for "${businessName}" in ${city}, ${state}. Return ONLY the facebook.com URL or NOT_FOUND.`, 10000);
     if (g && !g.includes('NOT_FOUND') && g.includes('facebook.com')) { const m = g.match(/https?:\/\/(www\.)?facebook\.com\/[^\s"',\]]+/); if (m) fbUrl = m[0].replace(/[.,;)]+$/, ''); }
@@ -252,15 +284,18 @@ async function checkFacebook(businessName, city, state, facebookUrl) {
 // ══════════════════════════════════════
 // CHECK 4: YELP (15pts)
 // ══════════════════════════════════════
-async function checkYelp(businessName, city, state) {
+async function checkYelp(businessName, city, state, outscraperYelpUrl) {
   console.log(`[SCAN] Yelp: ${businessName} ${city}`);
   let rawScore = 0, rating = 0, reviewCount = 0, claimed = false;
   const findings = [];
 
-  // Find URL via Gemini
-  let directUrl = null;
-  const g = await askGemini(`Find the Yelp page URL for "${businessName}" in ${city}, ${state}. Return ONLY the yelp.com URL or NOT_FOUND.`, 8000);
-  if (g && g.includes('yelp.com') && !g.includes('NOT_FOUND')) { const m = g.match(/https?:\/\/(www\.)?yelp\.com\/biz\/[^\s"',\]]+/); if (m) directUrl = m[0]; }
+  // Use Outscraper URL if available — skip search
+  let directUrl = outscraperYelpUrl || null;
+  if (directUrl) console.log(`[YELP] Using Outscraper URL: ${directUrl}`);
+  if (!directUrl) {
+    const g = await askGemini(`Find the Yelp page URL for "${businessName}" in ${city}, ${state}. Return ONLY the yelp.com URL or NOT_FOUND.`, 8000);
+    if (g && g.includes('yelp.com') && !g.includes('NOT_FOUND')) { const m = g.match(/https?:\/\/(www\.)?yelp\.com\/biz\/[^\s"',\]]+/); if (m) directUrl = m[0]; }
+  }
 
   // Scrape
   let html = '';
@@ -492,18 +527,42 @@ async function runFullScan({ businessName, city, state, website, facebookUrl, in
   console.log(`[SCAN] ═══ FULL 12-PLATFORM AUDIT: ${businessName}, ${city} ═══`);
   const t0 = Date.now();
 
+  // ── OUTSCRAPER: Get social URLs + enriched data in ONE call ──
+  const outscraperData = await outscraperSearch(`${businessName} ${city} ${state}`).catch(() => null);
+
+  // Also get contacts from website domain
+  const websiteDomain = (outscraperData?.site || website || '').replace(/https?:\/\//, '').split('/')[0];
+  const contactsData = websiteDomain ? await outscraperContacts(websiteDomain).catch(() => null) : null;
+
+  // Merge social URLs from both sources
+  const socialUrls = {
+    facebook: facebookUrl || outscraperData?.facebook || contactsData?.socials?.facebook || null,
+    instagram: outscraperData?.instagram || contactsData?.socials?.instagram || null,
+    twitter: outscraperData?.twitter || contactsData?.socials?.twitter || null,
+    linkedin: outscraperData?.linkedin || contactsData?.socials?.linkedin || null,
+    youtube: outscraperData?.youtube || contactsData?.socials?.youtube || null,
+    yelp: outscraperData?.yelp || null,
+  };
+  console.log(`[SCAN] Social URLs: ${JSON.stringify(socialUrls)}`);
+
   // Google is required
   let googleData;
   try { googleData = await checkGoogle(businessName, city, state); }
   catch (e) { console.error('[SCAN] Google CRASH:', e.message); return { error: 'Google check failed.', businessName, city, state, scannedAt: new Date().toISOString() }; }
 
-  const siteUrl = website || googleData.website || null;
+  // Enrich Google data with Outscraper extras
+  if (outscraperData) {
+    if (outscraperData.photos_count && outscraperData.photos_count > googleData.photoCount) googleData.photoCount = outscraperData.photos_count;
+    if (!googleData.hasDescription && outscraperData.description) { googleData.hasDescription = true; }
+  }
 
-  // Parallel checks
+  const siteUrl = website || googleData.website || outscraperData?.site || null;
+
+  // Parallel checks — pass Outscraper URLs to Facebook and Yelp
   const [webR, fbR, yelpR, bingR, appleR, bbbR, compR] = await Promise.allSettled([
     checkWebsite(siteUrl).catch(e => ({ found: false, rawScore: 0, maxScore: 25, score: 0, findings: [] })),
-    checkFacebook(businessName, city, state, facebookUrl).catch(e => ({ found: false, rawScore: 0, maxScore: 15, score: 0, findings: [] })),
-    checkYelp(businessName, city, state).catch(e => ({ found: false, rawScore: 0, maxScore: 15, score: 0, findings: [] })),
+    checkFacebook(businessName, city, state, socialUrls.facebook, outscraperData).catch(e => ({ found: false, rawScore: 0, maxScore: 15, score: 0, findings: [] })),
+    checkYelp(businessName, city, state, socialUrls.yelp).catch(e => ({ found: false, rawScore: 0, maxScore: 15, score: 0, findings: [] })),
     checkBing(businessName, city, state, googleData.phone).catch(e => ({ rawScore: 0, maxScore: 5, findings: [] })),
     checkAppleMaps(businessName, city, state).catch(e => ({ rawScore: 0, maxScore: 5, findings: [] })),
     checkBBB(businessName, city, state).catch(e => ({ rawScore: 0, maxScore: 5, findings: [] })),
@@ -537,6 +596,7 @@ async function runFullScan({ businessName, city, state, website, facebookUrl, in
   return {
     businessName, city, state, scannedAt: new Date().toISOString(),
     overallScore, scoreLabel, platforms, competitors: competitorData,
+    socialUrls,
     voiceSearch: { readiness: voiceAI.voicePct, appearsInAI: voiceAI.appearsInAI },
     allFindings,
     summary: insights.executiveSummary || '', revenueImpact: insights.revenueImpact || '',
