@@ -39,8 +39,10 @@ async function stripeRoutes(fastify) {
         customer_email: email,
         allow_promotion_codes: true,
         billing_address_collection: "auto",
+        client_reference_id: String(audit_id),
         metadata: {
           audit_id: String(audit_id),
+          email: email,
           customer_name: customer_name || "",
           product: "one_time_audit",
           tier: tier || "online",
@@ -186,7 +188,10 @@ async function stripeRoutes(fastify) {
     try {
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
-        const auditId = session.metadata?.audit_id;
+        console.log('[WEBHOOK] Session metadata:', JSON.stringify(session.metadata));
+        console.log('[WEBHOOK] client_reference_id:', session.client_reference_id);
+        const auditId = session.metadata?.audit_id || session.metadata?.auditId || session.client_reference_id;
+        console.log('[WEBHOOK] Resolved audit_id:', auditId);
         const product = session.metadata?.product;
         const amountPaid = typeof session.amount_total === "number" ? session.amount_total / 100 : null;
 
