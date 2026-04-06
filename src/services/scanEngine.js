@@ -359,8 +359,10 @@ Return ONLY JSON:
       { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 20000 });
     const text = res.data?.content?.[0]?.text || '';
     const m = text.match(/\{[\s\S]*\}/);
-    return m ? JSON.parse(m[0]) : { executiveSummary: text };
-  } catch (e) { console.error('[SCAN] AI:', e.message); return { executiveSummary: '' }; }
+    if (m) return JSON.parse(m[0]);
+    console.log('[SCAN] AI response not JSON:', text.slice(0, 200));
+    return { executiveSummary: text.slice(0, 300) };
+  } catch (e) { console.error('[SCAN] AI error:', e.message); return { executiveSummary: '' }; }
 }
 
 // ══════════════════════════════════════════════════
