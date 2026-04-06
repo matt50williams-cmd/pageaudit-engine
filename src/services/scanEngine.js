@@ -122,6 +122,8 @@ async function checkGoogle(businessName, city, state) {
 async function checkWebsite(websiteUrl) {
   if (!websiteUrl) return { found: false, rawScore: 0, maxScore: 25, score: 0, findings: [finding('Website', 'warning', 'No website provided', 'Cannot analyze website performance.', '', 'Add your website URL.')] };
   let url = websiteUrl.trim(); if (!url.startsWith('http')) url = `https://${url}`;
+  // Strip UTM/tracking params for clean analysis
+  try { const u = new URL(url); u.search = ''; url = u.toString().replace(/\/$/, ''); } catch {}
   console.log(`[SCAN] Website: ${url}`);
 
   let rawScore = 0;
@@ -172,7 +174,7 @@ async function checkWebsite(websiteUrl) {
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
     const psParams = { url, strategy: 'mobile', category: 'performance' };
     if (apiKey) psParams.key = apiKey;
-    const psRes = await ax.get('https://www.googleapis.com/pagespeedonline/v5/runPagespeed', { params: psParams, timeout: 20000 });
+    const psRes = await ax.get('https://www.googleapis.com/pagespeedonline/v5/runPagespeed', { params: psParams, timeout: 30000 });
     const lh = psRes.data?.lighthouseResult;
     perfScore = Math.round((lh?.categories?.performance?.score || 0) * 100);
     const fcp = lh?.audits?.['first-contentful-paint']?.numericValue;
@@ -193,11 +195,22 @@ async function checkWebsite(websiteUrl) {
 async function checkFacebook(businessName, city, state, facebookUrl) {
   console.log(`[SCAN] Facebook: ${businessName} ${city}`);
 
-  // Find Facebook URL via Gemini
+  // Find Facebook URL via Gemini with grounded search
   let fbUrl = facebookUrl || null;
   if (!fbUrl) {
-    const geminiResult = await askGemini(`Find the official Facebook business page URL for "${businessName}" in ${city}, ${state}. Return ONLY the URL or "NOT_FOUND".`);
-    if (geminiResult && geminiResult !== 'NOT_FOUND' && geminiResult.includes('facebook.com')) fbUrl = geminiResult.split('\n')[0].trim();
+    const geminiResult = await askGemini(`Search for the Facebook business page of "${businessName}" located in ${city}, ${state}. Return ONLY the facebook.com URL. If not found return NOT_FOUND. Do not guess — only return a URL you found via search.`, 12000);
+    if (geminiResult && !geminiResult.includes('NOT_FOUND') && geminiResult.includes('facebook.com')) {
+      const urlMatch = geminiResult.match(/https?:\/\/(www\.)?facebook\.com\/[^\s"',\]]+/);
+      fbUrl = urlMatch ? urlMatch[0].replace(/[.,;)]+$/, '') : null;
+    }
+  }
+  // Fallback: try direct Facebook search scrape
+  if (!fbUrl) {
+    try {
+      const searchRes = await ax.get(`https://www.facebook.com/search/pages/?q=${encodeURIComponent(businessName + ' ' + city)}`, { timeout: 6000 });
+      const fbMatch = (searchRes.data || '').match(/facebook\.com\/(?!search)[a-zA-Z0-9.]+/);
+      if (fbMatch) fbUrl = 'https://www.' + fbMatch[0];
+    } catch {}
   }
 
   if (!fbUrl) {
@@ -263,17 +276,40 @@ async function checkYelp(businessName, city, state) {
   const f = (sev, title, desc, impact, fix) => findings.push(finding('Yelp', sev, title, desc, impact, fix));
 
   try {
-    // Try BrightData first, fallback to direct
-    let html = '';
-    try { const proxyRes = await fetchViaProxy(searchUrl, 8000); html = proxyRes.html || ''; } catch {}
-    if (!html) { const directRes = await ax.get(searchUrl, { timeout: 6000 }); html = directRes.data || ''; }
+    let html = '', rating = 0, reviewCount = 0, claimed = false;
 
-    const $ = cheerio.load(html);
-    const ratingText = $('[class*="rating"]').first().attr('aria-label') || $('meta[itemprop="ratingValue"]').attr('content') || '';
-    const rating = parseFloat(ratingText.match(/[\d.]+/)?.[0] || '0');
-    const reviewText = $('[class*="reviewCount"]').first().text() || $('meta[itemprop="reviewCount"]').attr('content') || '';
-    const reviewCount = parseInt((reviewText.match(/\d+/) || ['0'])[0]);
-    const claimed = html.toLowerCase().includes('claimed');
+    // Method 1: Try Gemini to find Yelp URL
+    const yelpGemini = await askGemini(`Find the Yelp business page URL for "${businessName}" in ${city}, ${state}. Return ONLY the yelp.com URL or NOT_FOUND.`, 8000);
+    let directUrl = null;
+    if (yelpGemini && yelpGemini.includes('yelp.com') && !yelpGemini.includes('NOT_FOUND')) {
+      const m = yelpGemini.match(/https?:\/\/(www\.)?yelp\.com\/biz\/[^\s"',\]]+/);
+      if (m) directUrl = m[0];
+    }
+
+    // Method 2: Try direct business page via BrightData
+    if (directUrl) {
+      try { const r = await fetchViaProxy(directUrl, 8000); html = r.html || ''; } catch {}
+    }
+
+    // Method 3: Try search page
+    if (!html) {
+      try { const r = await fetchViaProxy(searchUrl, 8000); html = r.html || ''; } catch {}
+    }
+    if (!html) { try { const r = await ax.get(searchUrl, { timeout: 6000 }); html = r.data || ''; } catch {} }
+
+    // Also try slug-based direct URL
+    if (!html) {
+      const slug = `${businessName}-${city}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
+      try { const r = await ax.get(`https://www.yelp.com/biz/${slug}`, { timeout: 5000 }); html = r.data || ''; } catch {}
+    }
+
+    if (html) {
+      const ratingMatch = html.match(/(\d\.\d)\s*star/i) || html.match(/aria-label="(\d\.?\d?)\s*star/i) || html.match(/ratingValue.*?(\d\.?\d?)/i);
+      rating = parseFloat(ratingMatch?.[1] || '0');
+      const revMatch = html.match(/(\d+)\s*review/i);
+      reviewCount = parseInt(revMatch?.[1] || '0');
+      claimed = html.toLowerCase().includes('claimed');
+    }
 
     if (rating > 0) {
       rawScore += 5; // Listed and found
@@ -373,10 +409,16 @@ async function checkCompetitors(businessName, city, state, googleData) {
     const loc = geoRes.data?.results?.[0]?.geometry?.location;
     if (!loc) return { competitors: [], ranking: null };
 
-    // Search nearby same type
-    const nearbyRes = await ax.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', {
+    // Search nearby — try specific type first, fallback to keyword search
+    let nearbyRes = await ax.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', {
       params: { location: `${loc.lat},${loc.lng}`, radius: 8000, type, key: apiKey }
     });
+    // If few results, try keyword search instead
+    if ((nearbyRes.data?.results || []).length < 3) {
+      nearbyRes = await ax.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', {
+        params: { location: `${loc.lat},${loc.lng}`, radius: 10000, keyword: type.replace(/_/g, ' '), key: apiKey }
+      });
+    }
 
     const competitors = (nearbyRes.data?.results || [])
       .filter(p => p.place_id !== googleData.placeId && p.rating > 0)
