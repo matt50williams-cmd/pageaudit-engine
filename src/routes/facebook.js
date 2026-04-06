@@ -228,6 +228,23 @@ Rules:
       found: deduped.length > 0,
     });
   });
+
+  // Facebook Graph API activation test
+  fastify.get('/api/facebook/activate', async (request, reply) => {
+    const appId = process.env.FACEBOOK_APP_ID || '1374899884655489';
+    const appSecret = process.env.FACEBOOK_APP_SECRET;
+    if (!appSecret) return reply.send({ error: 'FACEBOOK_APP_SECRET not set in environment' });
+    const token = appId + '|' + appSecret;
+    try {
+      const res = await fetch('https://graph.facebook.com/v18.0/me?access_token=' + token);
+      const data = await res.json();
+      console.log('[FACEBOOK] Test API call result:', JSON.stringify(data));
+      return reply.send({ success: true, result: data });
+    } catch (e) {
+      console.error('[FACEBOOK] Test call failed:', e.message);
+      return reply.send({ error: e.message });
+    }
+  });
 }
 
 function isValidFbUrl(url) {
@@ -281,25 +298,3 @@ function isValidFbUrl(url) {
 }
 
 module.exports = facebookRoutes;
-
-// Standalone activation test — added to the route function via monkey-patch
-const originalRoutes = module.exports;
-module.exports = async function(fastify) {
-  await originalRoutes(fastify);
-
-  fastify.get('/api/facebook/activate', async (request, reply) => {
-    const appId = process.env.FACEBOOK_APP_ID || '1374899884655489';
-    const appSecret = process.env.FACEBOOK_APP_SECRET;
-    if (!appSecret) return reply.send({ error: 'FACEBOOK_APP_SECRET not set in environment' });
-    const token = appId + '|' + appSecret;
-    try {
-      const res = await fetch('https://graph.facebook.com/v18.0/me?access_token=' + token);
-      const data = await res.json();
-      console.log('[FACEBOOK] Test API call result:', JSON.stringify(data));
-      return reply.send({ success: true, result: data });
-    } catch (e) {
-      console.error('[FACEBOOK] Test call failed:', e.message);
-      return reply.send({ error: e.message });
-    }
-  });
-};
