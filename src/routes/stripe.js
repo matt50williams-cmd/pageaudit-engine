@@ -156,22 +156,29 @@ async function stripeRoutes(fastify) {
   });
 
   fastify.post("/api/stripe/webhook", { config: { rawBody: true } }, async (request, reply) => {
+    console.log('[WEBHOOK] Stripe webhook received');
     const sig = request.headers["stripe-signature"];
     let event;
 
     try {
       if (!process.env.STRIPE_WEBHOOK_SECRET) {
+        console.error('[WEBHOOK] STRIPE_WEBHOOK_SECRET is not configured!');
         return reply.status(500).send({ error: "STRIPE_WEBHOOK_SECRET is not configured" });
       }
 
-      const rawBody = request.rawBody || request.body;
+      // rawBody stored on raw Node request by custom content type parser in server.js
+      const rawBody = request.rawBody || request.raw?.rawBody || request.body;
+      const bodyString = typeof rawBody === "string" ? rawBody : JSON.stringify(rawBody);
+      console.log('[WEBHOOK] Raw body type:', typeof rawBody, '| Length:', bodyString?.length || 0, '| Sig present:', !!sig);
 
       event = stripe.webhooks.constructEvent(
-        typeof rawBody === "string" ? rawBody : JSON.stringify(rawBody),
+        bodyString,
         sig,
         process.env.STRIPE_WEBHOOK_SECRET
       );
+      console.log('[WEBHOOK] Event type:', event.type);
     } catch (err) {
+      console.error('[WEBHOOK] Signature verification FAILED:', err.message);
       request.log.error(err, "Stripe webhook signature invalid");
       return reply.status(400).send({ error: "Webhook signature invalid" });
     }
@@ -190,6 +197,7 @@ async function stripeRoutes(fastify) {
             `UPDATE audits SET paid = TRUE, amount_paid = $1, rep_code = $2, updated_at = NOW() WHERE id = $3`,
             [amountPaid, repCode || null, auditId]
           );
+          console.log(`[WEBHOOK] Audit ${auditId} marked paid = TRUE, amount = $${amountPaid}`);
 
           await queryOne(
             `INSERT INTO funnel_events (event_type, email, report_id, metadata) VALUES ($1, $2, $3, $4)`,
@@ -256,6 +264,7 @@ async function stripeRoutes(fastify) {
         }
       }
 
+      console.log('[WEBHOOK] Processing complete for event:', event.type);
       return reply.send({ received: true });
     } catch (err) {
       request.log.error(err, "Stripe webhook processing error");

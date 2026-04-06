@@ -36,11 +36,14 @@ app.register(cors, {
 });
 
 // Needed so Stripe webhook signature verification works
+// Store raw body string on the request for webhook signature verification
 app.addContentTypeParser("application/json", { parseAs: "string" }, function (req, body, done) {
+  // Store on raw Node request — Fastify route handler accesses via request.raw.rawBody
   req.rawBody = body;
 
   try {
-    done(null, body ? JSON.parse(body) : {});
+    const parsed = body ? JSON.parse(body) : {};
+    done(null, parsed);
   } catch (err) {
     done(err);
   }
