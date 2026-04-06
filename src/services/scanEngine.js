@@ -208,38 +208,78 @@ async function checkSearchVisibility(businessName, city, state, businessType) {
 async function checkCompetitors(businessName, city, state, googleData) {
   console.log(`[SCAN] Competitors: ${businessName}`);
   const key = process.env.GOOGLE_PLACES_API_KEY;
-  if (!key || !googleData?.placeId) return { competitors: [], ranking: null, dataPoints: 0 };
-  try {
-    const type = googleData.types?.[0] || 'establishment';
-    const geo = await ax.get('https://maps.googleapis.com/maps/api/geocode/json', { params: { address: googleData.address || `${city}, ${state}`, key } });
-    const loc = geo.data?.results?.[0]?.geometry?.location;
-    if (!loc) return { competitors: [], ranking: null, dataPoints: 0 };
+  const fallbackResult = (source) => ({
+    competitors: [], ranking: null, dataPoints: 0, findings: [],
+    estimated: true, source,
+  });
 
-    // Try type first, then keyword
+  if (!key) { console.log('[SCAN] Competitors: no API key'); return fallbackResult('no_api_key'); }
+
+  try {
+    // Get location for nearby search
+    const geoQuery = googleData?.address || `${businessName} ${city} ${state}`;
+    const geo = await ax.get('https://maps.googleapis.com/maps/api/geocode/json', { params: { address: geoQuery, key } });
+    const loc = geo.data?.results?.[0]?.geometry?.location;
+    if (!loc) { console.log('[SCAN] Competitors: geocode failed'); return fallbackResult('geocode_failed'); }
+
+    const type = googleData?.types?.[0] || 'establishment';
+    const bizPlaceId = googleData?.placeId || null;
+
+    // Try multiple search strategies
     let results = [];
-    for (const params of [
+    const searches = [
       { location: `${loc.lat},${loc.lng}`, radius: 10000, type, key },
       { location: `${loc.lat},${loc.lng}`, radius: 15000, keyword: type.replace(/_/g, ' '), key },
-    ]) {
+      { location: `${loc.lat},${loc.lng}`, radius: 20000, keyword: `${type.replace(/_/g, ' ')} ${city}`, key },
+    ];
+    for (const params of searches) {
       const r = await ax.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', { params });
-      results = (r.data?.results || []).filter(p => p.place_id !== googleData.placeId && p.rating > 0);
-      if (results.length >= 3) break;
+      const filtered = (r.data?.results || []).filter(p => (!bizPlaceId || p.place_id !== bizPlaceId));
+      // Include businesses even without rating — they still exist as competitors
+      if (filtered.length > results.length) results = filtered;
+      if (results.length >= 5) break;
     }
 
-    const competitors = results.slice(0, 5).map(p => ({ name: p.name, rating: p.rating || 0, reviewCount: p.user_ratings_total || 0, address: p.vicinity || '' }));
-    const all = [{ name: businessName, rating: googleData.rating, reviewCount: googleData.reviewCount }, ...competitors];
-    all.sort((a, b) => (b.rating * 10 + Math.log(b.reviewCount + 1)) - (a.rating * 10 + Math.log(a.reviewCount + 1)));
-    const ranking = all.findIndex(b => b.name === businessName) + 1;
-    const leader = competitors[0];
-    const reviewGap = leader ? leader.reviewCount - googleData.reviewCount : 0;
+    console.log(`[SCAN] Competitors: found ${results.length} nearby businesses`);
+
+    const competitors = results.slice(0, 5).map(p => ({
+      name: p.name,
+      rating: p.rating || null,
+      reviewCount: p.user_ratings_total || 0,
+      address: p.vicinity || '',
+      estimated: !p.rating,
+    }));
+
+    // Ranking only if we have Google data for this business
+    let ranking = null, totalInArea = competitors.length + 1, reviewGap = 0;
+    if (googleData?.rating && competitors.length > 0) {
+      const all = [{ name: businessName, rating: googleData.rating, reviewCount: googleData.reviewCount || 0 }, ...competitors.filter(c => c.rating)];
+      all.sort((a, b) => (b.rating * 10 + Math.log((b.reviewCount || 0) + 1)) - (a.rating * 10 + Math.log((a.reviewCount || 0) + 1)));
+      ranking = all.findIndex(b => b.name === businessName) + 1;
+      totalInArea = all.length;
+    }
+    const leader = competitors.filter(c => c.rating).sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0))[0];
+    reviewGap = leader ? (leader.reviewCount || 0) - (googleData?.reviewCount || 0) : 0;
 
     const findings = [];
-    if (ranking > 3) findings.push(F('Competitors', 'warning', `You rank #${ranking} out of ${all.length} similar businesses nearby`, `When a customer searches for your type of business in your area, ${all.length} competitors appear — and you are #${ranking}.`, 'Customers rarely look past the top 3 results. Being ranked #${ranking} means most searchers never see your business.', 'Focus on getting more reviews and completing your Google Business Profile. Every improvement moves you up.'));
-    else if (ranking > 0) findings.push(F('Competitors', 'good', `You rank #${ranking} out of ${all.length} similar businesses nearby`, `Among ${all.length} competitors in your area, you are in the top ${ranking}.`, 'Customers see top-ranked businesses first — this position gives you a significant advantage.', ''));
-    if (reviewGap > 50) findings.push(F('Competitors', 'warning', `Top competitor has ${reviewGap} more reviews than you`, `${leader.name} leads with ${leader.reviewCount} reviews compared to your ${googleData.reviewCount}.`, 'Customers trust businesses with more reviews. This gap means ${leader.name} likely gets clicks that should be going to you.', `Start a review campaign to close this gap. Even gaining 5 reviews per month puts you on a path to catch ${leader.name}.`));
+    if (ranking && ranking > 3) findings.push(F('Competitors', 'warning', `You rank #${ranking} out of ${totalInArea} similar businesses nearby`, `When a customer searches for your type of business in your area, ${totalInArea} competitors appear — and you are #${ranking}.`, 'Customers rarely look past the top 3 results.', 'Focus on getting more reviews and completing your Google Business Profile.'));
+    else if (ranking && ranking > 0) findings.push(F('Competitors', 'good', `You rank #${ranking} out of ${totalInArea} similar businesses nearby`, `Among ${totalInArea} competitors in your area, you are in the top ${ranking}.`, 'Customers see top-ranked businesses first.', ''));
+    if (leader && reviewGap > 50) findings.push(F('Competitors', 'warning', `Top competitor has ${reviewGap} more reviews than you`, `${leader.name} leads with ${leader.reviewCount} reviews compared to your ${googleData?.reviewCount || 0}.`, 'Customers trust businesses with more reviews.', `Start a review campaign to close this gap.`));
 
-    return { competitors, ranking, totalInArea: all.length, reviewGap, findings, dataPoints: competitors.length * 8 };
-  } catch (e) { console.log(`[SCAN] Competitors: ${e.message}`); return { competitors: [], ranking: null, dataPoints: 0 }; }
+    return {
+      competitors,
+      ranking,
+      totalInArea,
+      reviewGap,
+      findings,
+      dataPoints: competitors.length * 8,
+      estimated: competitors.length === 0,
+      source: competitors.length > 0 ? 'google_nearby' : 'no_results',
+    };
+  } catch (e) {
+    console.error(`[SCAN] Competitors error: ${e.message}`);
+    return fallbackResult('error');
+  }
 }
 
 // ══════════════════════════════════════════════════
