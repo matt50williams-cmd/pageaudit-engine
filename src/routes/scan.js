@@ -30,6 +30,36 @@ setInterval(() => {
 
 async function scanRoutes(fastify) {
 
+  // ── TEST: Verify web search works ──
+  fastify.get('/api/scan/test-research', async (request, reply) => {
+    if (!process.env.ANTHROPIC_API_KEY) return reply.send({ error: 'No API key' });
+    try {
+      const res = await axios.post('https://api.anthropic.com/v1/messages', {
+        model: 'claude-sonnet-4-5-20250514',
+        max_tokens: 500,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{ role: 'user', content: 'Search for "Allred Heating Cooling Auburn WA" and tell me their Google rating. Return just the rating number.' }]
+      }, {
+        headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        timeout: 30000
+      });
+      return reply.send({
+        success: true,
+        model: 'claude-sonnet-4-5-20250514',
+        contentBlocks: res.data?.content?.length,
+        hasText: res.data?.content?.some(b => b.type === 'text'),
+        stopReason: res.data?.stop_reason,
+        response: res.data?.content?.find(b => b.type === 'text')?.text?.slice(0, 200)
+      });
+    } catch (e) {
+      return reply.send({
+        error: e.message,
+        status: e.response?.status,
+        details: JSON.stringify(e.response?.data)?.slice(0, 500)
+      });
+    }
+  });
+
   // ── IDENTIFY BUSINESS FROM WEBSITE URL ──
   fastify.post('/api/scan/identify-from-website', async (request, reply) => {
     const { websiteUrl } = request.body || {};
