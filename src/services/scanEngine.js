@@ -325,54 +325,83 @@ async function checkCompetitors(businessName, city, state, googleData) {
 // ══════════════════════════════════════════════════
 // WEB RESEARCH (Claude with web_search tool)
 // ══════════════════════════════════════════════════
-async function researchBusinessOnWeb(businessName, city, state, website, socialLinks) {
+async function researchBusinessOnWeb(businessName, city, state, website, socialLinks, googleData) {
   if (!process.env.ANTHROPIC_API_KEY) return null;
+
+  const primaryType = (googleData?.types || []).find(t => !['establishment', 'point_of_interest', 'local_business'].includes(t));
+  const businessType = primaryType ? primaryType.replace(/_/g, ' ') : 'local business';
+
   try {
-    console.log(`[WEB RESEARCH] Starting for ${businessName}, ${city} ${state}`);
+    console.log(`[WEB RESEARCH] Deep research starting for ${businessName} (${businessType})...`);
     const res = await axios.post('https://api.anthropic.com/v1/messages', {
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 2000,
+      model: 'claude-sonnet-4-5-20250514',
+      max_tokens: 4000,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: [{
         role: 'user',
-        content: `Research this local business and find everything publicly available about them online.
+        content: `You are a senior business intelligence analyst. Research "${businessName}" in ${city}, ${state} thoroughly. This is a ${businessType} business with a website at ${website || 'unknown'}.
 
-BUSINESS: ${businessName}
-LOCATION: ${city}, ${state}
-WEBSITE: ${website || 'unknown'}
-KNOWN SOCIAL LINKS: ${JSON.stringify(socialLinks || {})}
+You must search for ALL of the following. Do not skip any:
 
-Search for:
-1. Their BBB listing and rating
-2. Their Yelp listing and rating
-3. Their Facebook page and activity level
-4. Any news mentions or press coverage
-5. Customer complaints or issues mentioned online
-6. Their reputation on review sites beyond Google
-7. Any directory listings (Angi, HomeAdvisor, Thumbtack, etc.)
+1. Search "${businessName} ${city} reviews" — find their overall reputation
+2. Search "${businessName} BBB" — find their BBB rating, accreditation status, number of complaints, and what complaints are about
+3. Search "${businessName} Yelp" — find their Yelp rating, review count, and what customers say
+4. Search "${businessName} complaints" — find any negative press, complaints, or issues
+5. Search "${businessName} Facebook" — find their Facebook page, how active it is, follower count
+6. Search "${businessType} ${city} ${state} best" — find who their real competitors are and what makes them stand out
+7. Search their top competitor name + "reviews" — understand what that competitor does better
+8. Search "${businessName}" alone — find any news, press, awards, or mentions
+9. Search "${businessType} ${city} customer complaints" — understand what customers in this market complain about industry-wide
+10. Search "${businessName} owner" OR "${businessName} about" — find their story, how long in business, values
 
-After searching, return ONLY a JSON object:
+After ALL searches are complete, return ONLY a JSON object with this exact structure:
+
 {
-  "bbb": { "found": true/false, "rating": "A+/A/B/etc or null", "url": "url or null", "accredited": true/false, "complaintCount": 0 },
-  "yelp": { "found": true/false, "rating": null, "reviewCount": null, "url": "url or null" },
-  "facebook": { "found": true/false, "url": "url or null", "active": true/false },
-  "otherDirectories": ["list of other places they appear"],
-  "onlineReputation": "1-2 sentence summary of their overall online reputation",
-  "redFlags": ["any complaints, issues, or negative patterns found"],
-  "positives": ["notable positive mentions or achievements found"]
+  "companyOverview": {
+    "founded": "year or null",
+    "owners": "owner names if found",
+    "locations": ["list of locations"],
+    "serviceArea": "area they serve",
+    "specialties": ["main services"],
+    "certifications": ["any certifications or partnerships found"],
+    "awardsOrRecognition": ["any awards or press mentions"],
+    "uniqueStrengths": ["what makes them genuinely stand out"]
+  },
+  "bbb": { "found": true, "rating": "A+", "accredited": true, "complaintCount": 0, "complaintPatterns": ["what complaints are about if found"], "url": "url or null" },
+  "yelp": { "found": true, "rating": 0.0, "reviewCount": 0, "topPraise": ["what customers praise"], "topComplaints": ["what customers complain about"], "url": "url or null" },
+  "facebook": { "found": true, "url": "url or null", "followerCount": "approximate if found", "postingFrequency": "daily/weekly/monthly/inactive/unknown", "lastPostApprox": "rough timeframe or unknown" },
+  "reviewPatterns": {
+    "overallSentiment": "positive/mixed/negative",
+    "topPraiseThemes": ["specific things customers love"],
+    "topComplaintThemes": ["specific recurring complaints"],
+    "operationalInsights": ["patterns suggesting operational issues"],
+    "staffMentions": ["specific staff mentioned positively or negatively"],
+    "competitiveInsights": ["things reviewers say comparing to competitors"]
+  },
+  "realCompetitors": [
+    { "name": "competitor", "type": "same type", "rating": 0.0, "reviewCount": 0, "whatTheyDoBetter": "specific advantage", "whatTheyDoWorse": "specific weakness", "keyDifferentiator": "why customers choose them" }
+  ],
+  "marketIntelligence": {
+    "industryComplaints": ["what customers complain about industry-wide"],
+    "winningFactors": ["what separates top businesses"],
+    "opportunities": ["specific market gaps"]
+  },
+  "onlinePresenceGaps": ["specific things missing from their online presence"],
+  "redFlags": ["any serious concerns found"],
+  "positives": ["notable achievements or strengths"],
+  "confidenceLevel": "high/medium/low"
 }`
       }]
-    }, { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 45000 });
+    }, { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 120000 });
 
     const textBlock = res.data?.content?.find(b => b.type === 'text');
-    if (!textBlock) { console.log('[WEB RESEARCH] No text block in response'); return null; }
+    if (!textBlock) { console.log('[WEB RESEARCH] No text block'); return null; }
     const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
-      console.log(`[WEB RESEARCH] OK. BBB=${parsed.bbb?.found} Yelp=${parsed.yelp?.found} FB=${parsed.facebook?.found}`);
+      console.log(`[WEB RESEARCH] Complete. BBB=${parsed.bbb?.found} Yelp=${parsed.yelp?.found} Competitors=${parsed.realCompetitors?.length} Confidence=${parsed.confidenceLevel}`);
       return parsed;
     }
-    console.log('[WEB RESEARCH] No JSON in response');
     return null;
   } catch (e) {
     console.error(`[WEB RESEARCH] Failed: ${e.message}`);
@@ -421,23 +450,60 @@ async function enrichCompetitorData(competitors) {
   }));
 }
 
-async function generateCompetitorAnalysis(businessName, city, state, platforms, compData, bizIntel) {
+async function generateCompetitorAnalysis(businessName, city, state, platforms, compData, bizIntel, extra) {
   if (!process.env.ANTHROPIC_API_KEY) return { comparisonSummary: '', keyGaps: [], whereCompetitive: [], opportunitiesToWin: [] };
-  const comps = compData?.competitors || [];
-  if (comps.length === 0) return { comparisonSummary: 'No competitor data available.', keyGaps: [], whereCompetitive: [], opportunitiesToWin: [] };
+
+  // Use real competitors from web research if available, fall back to Google data
+  const wr = extra?.webResearch;
+  const researchedComps = wr?.realCompetitors || [];
+  const googleComps = compData?.competitors || [];
+  const hasDeepData = researchedComps.length > 0;
+
+  if (googleComps.length === 0 && researchedComps.length === 0) return { comparisonSummary: 'No competitor data available.', keyGaps: [], whereCompetitive: [], opportunitiesToWin: [] };
+
   try {
-    const enriched = await enrichCompetitorData(comps);
-    const compDetails = enriched.map((c, i) => { let d = `${i+1}. ${c.name} — ${c.rating || 'unrated'} stars, ${c.reviewCount} reviews, ${c.hasWebsite ? 'has website' : 'no website'}, ${c.photoCount} photos`; if (c.description) d += `\n   Description: ${c.description}`; if (c.websiteText) d += `\n   Website snippet: ${c.websiteText.substring(0, 300)}`; return d; }).join('\n\n');
+    let compDetails;
+    if (hasDeepData) {
+      compDetails = researchedComps.map((c, i) => `${i + 1}. ${c.name} (${c.type || 'same industry'})
+   Rating: ${c.rating || 'unknown'} stars, ${c.reviewCount || 'unknown'} reviews
+   What they do BETTER: ${c.whatTheyDoBetter}
+   Their weakness: ${c.whatTheyDoWorse}
+   Why customers choose them: ${c.keyDifferentiator}`).join('\n\n');
+    } else {
+      const enriched = await enrichCompetitorData(googleComps);
+      compDetails = enriched.map((c, i) => { let d = `${i + 1}. ${c.name} — ${c.rating || 'unrated'} stars, ${c.reviewCount} reviews, ${c.hasWebsite ? 'has website' : 'no website'}, ${c.photoCount} photos`; if (c.description) d += `\n   Description: ${c.description}`; if (c.websiteText) d += `\n   Website snippet: ${c.websiteText.substring(0, 300)}`; return d; }).join('\n\n');
+    }
+
     const bizContext = bizIntel ? `\nSUBJECT SERVICES: ${bizIntel.primaryService}\nTARGET: ${bizIntel.targetCustomer}\nCERTIFICATIONS: ${bizIntel.certifications?.join(', ') || 'none'}` : '';
+    const reviewContext = wr?.reviewPatterns ? `\nSUBJECT REVIEW PATTERNS:\n- Customers love: ${wr.reviewPatterns.topPraiseThemes?.join(', ')}\n- Customers complain about: ${wr.reviewPatterns.topComplaintThemes?.join(', ')}` : '';
 
-    const prompt = `Competitive intelligence for a local business audit.\n\nSUBJECT: ${businessName}, ${city} ${state || ''}\nGOOGLE: ${platforms.google?.rating || 'N/A'} stars, ${platforms.google?.reviewCount || 0} reviews${bizContext}\n\nCOMPETITORS:\n${compDetails}\n\nFor each competitor analyze: overlapping services, same geographic area, one thing they do better online, one vulnerability to exploit.\nDo NOT just list star ratings. Give actionable competitive intelligence.\n\nReturn ONLY JSON:\n{"comparisonSummary":"2-3 paragraphs naming competitors with numbers","keyGaps":["specific gap with competitor name"],"whereCompetitive":["specific strength vs named competitor"],"opportunitiesToWin":["specific action targeting competitor weakness"]}`;
+    const prompt = `You are a competitive intelligence analyst writing a premium business audit section. You have deep research data on both the subject business and their competitors.
 
+SUBJECT: ${businessName}, ${city} ${state || ''}
+GOOGLE: ${platforms.google?.rating || 'N/A'} stars, ${platforms.google?.reviewCount || 0} reviews${bizContext}${reviewContext}
+
+COMPETITORS (${hasDeepData ? 'from deep web research' : 'from Google data'}):
+${compDetails}
+
+For each competitor analyze:
+- What services they emphasize that overlap with the subject business
+- Whether they serve the same geographic area
+- One specific thing they do better online (more reviews, better description, more photos, etc.)
+- One specific vulnerability the subject business could exploit
+- What customer reviews say about choosing between them
+
+Do NOT just compare star ratings. Give intelligence a CEO would pay for.
+
+Return ONLY JSON:
+{"comparisonSummary":"2-3 paragraphs naming competitors directly with specific numbers and customer behavior insights","keyGaps":["specific gap naming the competitor and real customer impact"],"whereCompetitive":["specific strength vs a named competitor with data"],"opportunitiesToWin":["specific actionable move targeting a named competitor weakness"]}`;
+
+    console.log(`[COMPETITORS] Generating analysis (Sonnet, ${hasDeepData ? 'deep data' : 'Google data'})...`);
     const res = await axios.post('https://api.anthropic.com/v1/messages',
-      { model: 'claude-haiku-4-5-20251001', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] },
-      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 20000 });
+      { model: 'claude-sonnet-4-5-20250514', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] },
+      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 30000 });
     const text = res.data?.content?.[0]?.text || '';
     const m = text.match(/\{[\s\S]*\}/);
-    if (m) { const p = JSON.parse(m[0]); return { comparisonSummary: p.comparisonSummary || '', keyGaps: p.keyGaps || [], whereCompetitive: p.whereCompetitive || [], opportunitiesToWin: p.opportunitiesToWin || [] }; }
+    if (m) { const p = JSON.parse(m[0]); console.log('[COMPETITORS] Analysis complete.'); return { comparisonSummary: p.comparisonSummary || '', keyGaps: p.keyGaps || [], whereCompetitive: p.whereCompetitive || [], opportunitiesToWin: p.opportunitiesToWin || [] }; }
     return { comparisonSummary: '', keyGaps: [], whereCompetitive: [], opportunitiesToWin: [] };
   } catch (e) { console.error(`[COMPETITORS] Failed: ${e.message}`); return { comparisonSummary: '', keyGaps: [], whereCompetitive: [], opportunitiesToWin: [] }; }
 }
@@ -446,28 +512,117 @@ async function generateCompetitorAnalysis(businessName, city, state, platforms, 
 // AI INSIGHTS (Claude Haiku)
 // ══════════════════════════════════════════════════
 async function generateInsights(biz, city, state, platforms, score, extra) {
-  if (!process.env.ANTHROPIC_API_KEY) return { executiveSummary: '', topPriorities: [], quickWins: [], whatYoureDoingWell: [], competitorIntel: '', monthlyGoal: '', revenueImpact: '', businessIntelligence: null };
+  if (!process.env.ANTHROPIC_API_KEY) return { executiveSummary: '', topPriorities: [], quickWins: [], whatYoureDoingWell: [], competitorIntel: '', monthlyGoal: '', revenueImpact: '', businessIntelligence: null, operationalInsights: [], marketOpportunities: [] };
 
   const p = platforms;
   const bizIntel = await extractBusinessIntelligence(p.website?.html, p.google, biz, city, state);
+  const wr = extra.webResearch;
+  const comp = extra.competitors;
 
-  const bizSection = bizIntel ? `\nBUSINESS INTELLIGENCE:\n- Primary Service: ${bizIntel.primaryService}\n- Other Services: ${bizIntel.secondaryServices?.join(', ') || 'none'}\n- Serves: ${bizIntel.targetCustomer}\n- Value Prop: ${bizIntel.uniqueValueProp || 'not stated'}\n- Certifications: ${bizIntel.certifications?.join(', ') || 'none'}\n- Emergency: ${bizIntel.emergencyService ? 'Yes' : 'No'}\n- Missing from Website: ${bizIntel.missingFromWebsite?.join(', ') || 'none'}` : '';
-  const reviewSection = p.reviews?.sentiment ? `\nCUSTOMER REVIEWS:\n- Praise: ${p.reviews.sentiment.praiseThemes?.join(', ') || 'none'}\n- Complaints: ${p.reviews.sentiment.complaintThemes?.join(', ') || 'none'}\n- Sentiment: ${p.reviews.sentiment.sentimentScore}/10` : '';
-  const webResearchSection = extra.webResearch ? `\nONLINE REPUTATION:\n- BBB: ${extra.webResearch.bbb?.found ? `Rating: ${extra.webResearch.bbb?.rating}, Accredited: ${extra.webResearch.bbb?.accredited}` : 'Not found'}\n- Reputation: ${extra.webResearch.onlineReputation || 'unknown'}\n- Red Flags: ${extra.webResearch.redFlags?.join(', ') || 'none'}\n- Positives: ${extra.webResearch.positives?.join(', ') || 'none'}` : '';
+  const companyContext = `
+COMPANY OVERVIEW (from web research):
+${wr?.companyOverview ? `- Founded: ${wr.companyOverview.founded || 'unknown'}
+- Owners: ${wr.companyOverview.owners || 'unknown'}
+- Locations: ${wr.companyOverview.locations?.join(', ') || 'unknown'}
+- Service Area: ${wr.companyOverview.serviceArea || 'unknown'}
+- Specialties: ${wr.companyOverview.specialties?.join(', ') || 'unknown'}
+- Certifications: ${wr.companyOverview.certifications?.join(', ') || 'none found'}
+- Awards: ${wr.companyOverview.awardsOrRecognition?.join(', ') || 'none found'}
+- Unique Strengths: ${wr.companyOverview.uniqueStrengths?.join(', ') || 'none found'}` : 'Limited company data'}
 
-  const prompt = `You are a local business expert writing a premium audit report. Every recommendation must be specific to THIS business.\n\nBUSINESS: ${biz}, ${city} ${state || ''}\nINDUSTRY: ${extra.industry || 'local business'}\nCHALLENGE: ${extra.biggestChallenge || 'not provided'}\nSCORE: ${score}/100\n${bizSection}\n${reviewSection}\n${webResearchSection}\nPLATFORMS:\n- Google: ${p.google?.rawScore||0}/35, Rating: ${p.google?.rating||'N/A'}, Reviews: ${p.google?.reviewCount||0}\n- Website: ${p.website?.rawScore||0}/25, Speed: ${p.website?.perfScore||'N/A'}/100\n- NAP: ${p.nap?.rawScore||0}/10\n- Reviews: ${p.reviews?.rawScore||0}/10\n- Facebook: ${p.facebook?.excluded ? 'Not scanned' : `${p.facebook?.rawScore||0}/10`}\n- Yelp: ${p.yelp?.excluded ? 'Not scanned' : `${p.yelp?.rawScore||0}/10`}\n\nCOMPETITORS:\n${(extra.competitors?.competitors || []).slice(0,3).map((c,i) => `${i+1}. ${c.name} — ${c.rating||'?'} stars, ${c.reviewCount} reviews`).join('\n') || 'None'}\n\nReturn ONLY JSON:\n{"summary":"2-3 specific sentences with real numbers","revenueImpact":"specific monthly estimate","topPriorities":[{"priority":1,"title":"specific","description":"what to do for THIS business","timeToComplete":"estimate","estimatedROI":"estimate","difficulty":"easy"}],"quickWins":["specific free action"],"whatYoureDoingWell":["specific strength with numbers"],"competitorIntel":"specific competitor intelligence","monthlyGoal":"one measurable 30-day goal"}`;
+WEBSITE INTELLIGENCE:
+${bizIntel ? `- Primary Service: ${bizIntel.primaryService}
+- Other Services: ${bizIntel.secondaryServices?.join(', ') || 'none'}
+- Target Customer: ${bizIntel.targetCustomer}
+- Value Prop: ${bizIntel.uniqueValueProp || 'not stated'}
+- Emergency Service: ${bizIntel.emergencyService ? 'Yes' : 'No'}
+- Missing from Website: ${bizIntel.missingFromWebsite?.join(', ') || 'none'}` : 'Website intelligence unavailable'}
+
+REPUTATION ACROSS PLATFORMS:
+- Google: ${p.google?.rating} stars, ${p.google?.reviewCount} reviews
+- BBB: ${wr?.bbb?.found ? `Rating: ${wr.bbb.rating}, Accredited: ${wr.bbb.accredited}, Complaints: ${wr.bbb.complaintCount}${wr.bbb.complaintPatterns?.length ? ' (' + wr.bbb.complaintPatterns.join(', ') + ')' : ''}` : 'Not found'}
+- Yelp: ${wr?.yelp?.found ? `${wr.yelp.rating} stars, ${wr.yelp.reviewCount} reviews` : 'Not found'}
+- Facebook: ${wr?.facebook?.found ? `Page found, ${wr.facebook.followerCount || 'unknown'} followers, posting ${wr.facebook.postingFrequency}` : 'Not found'}
+
+REVIEW PATTERNS (what customers actually say):
+${wr?.reviewPatterns ? `- Sentiment: ${wr.reviewPatterns.overallSentiment}
+- What customers LOVE: ${wr.reviewPatterns.topPraiseThemes?.join(' | ') || 'unknown'}
+- What customers COMPLAIN about: ${wr.reviewPatterns.topComplaintThemes?.join(' | ') || 'unknown'}
+- Operational Issues: ${wr.reviewPatterns.operationalInsights?.join(' | ') || 'none'}
+- Staff Mentions: ${wr.reviewPatterns.staffMentions?.join(' | ') || 'none'}` : 'Review pattern data unavailable'}
+
+COMPETITOR INTELLIGENCE:
+${wr?.realCompetitors?.length > 0 ? wr.realCompetitors.map((c, i) => `${i + 1}. ${c.name} — ${c.rating} stars, ${c.reviewCount} reviews
+   Better at: ${c.whatTheyDoBetter}
+   Weakness: ${c.whatTheyDoWorse}
+   Why chosen: ${c.keyDifferentiator}`).join('\n') : (comp?.competitors || []).map(c => `${c.name} (${c.rating} stars, ${c.reviewCount} reviews)`).join(', ') || 'None'}
+
+MARKET INTELLIGENCE:
+${wr?.marketIntelligence ? `- Industry complaints: ${wr.marketIntelligence.industryComplaints?.join(' | ') || 'unknown'}
+- Winning factors: ${wr.marketIntelligence.winningFactors?.join(' | ') || 'unknown'}
+- Opportunities: ${wr.marketIntelligence.opportunities?.join(' | ') || 'unknown'}` : 'Market data unavailable'}
+
+RED FLAGS: ${wr?.redFlags?.join(' | ') || 'none'}
+POSITIVES: ${wr?.positives?.join(' | ') || 'none'}
+
+PLATFORM SCORES:
+- Google: ${p.google?.rawScore || 0}/35
+- Website: ${p.website?.rawScore || 0}/25 (Speed: ${p.website?.perfScore || 'N/A'}/100)
+- NAP: ${p.nap?.rawScore || 0}/10
+- Reviews: ${p.reviews?.rawScore || 0}/10
+- Facebook: ${p.facebook?.excluded ? 'Not scanned' : `${p.facebook?.rawScore || 0}/10`}
+- Yelp: ${p.yelp?.excluded ? 'Not scanned' : `${p.yelp?.rawScore || 0}/10`}
+- OVERALL: ${score}/100
+
+OWNER'S CHALLENGE: ${extra.biggestChallenge || 'not provided'}`;
+
+  const prompt = `You are the Chief Marketing Officer writing a premium audit for a local business. You have done deep research. This report must be so specific the owner says "how did they know that?" and shares it with their team.
+
+BUSINESS: ${biz}, ${city} ${state || ''}
+${companyContext}
+
+CRITICAL RULES:
+1. NEVER give generic advice. Every recommendation must reference specific data you found about THIS business.
+2. If review patterns exist, reference them specifically ("Your reviews mention scheduling issues 8 times").
+3. Name specific competitors and what they do better.
+4. Revenue impact must be realistic for this business size.
+5. Top priorities ordered by actual business impact, not generic SEO advice.
+6. If operational issues found in reviews, flag them as business improvements not just marketing.
+7. Be honest about weaknesses — business owners need truth, not flattery.
+
+Return ONLY a JSON object:
+{
+  "summary": "3-4 sentences PROVING you know this business. Reference actual rating, review themes, competitors by name, market position.",
+  "revenueImpact": "Realistic monthly estimate for this business size and market.",
+  "topPriorities": [{"priority":1,"title":"specific to THIS business","description":"why this matters based on real data found","timeToComplete":"realistic","estimatedROI":"appropriate for business size","difficulty":"easy|medium|hard","dataSource":"where this insight came from"}],
+  "quickWins": ["specific free action referencing actual gaps found"],
+  "whatYoureDoingWell": ["specific strength with real numbers from research"],
+  "competitorIntel": "2-3 sentences naming competitors, what they do better, what to do about it. Real data.",
+  "monthlyGoal": "One specific measurable 30-day goal appropriate for this business",
+  "operationalInsights": ["patterns from reviews suggesting operational improvements — staffing, training, process issues"],
+  "marketOpportunities": ["specific market gaps this business could fill based on research"]
+}`;
 
   try {
-    const res = await axios.post('https://api.anthropic.com/v1/messages', { model: 'claude-haiku-4-5-20251001', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] },
-      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 20000 });
+    console.log('[INSIGHTS] Generating with full research context (Sonnet)...');
+    const res = await axios.post('https://api.anthropic.com/v1/messages',
+      { model: 'claude-sonnet-4-5-20250514', max_tokens: 3000, messages: [{ role: 'user', content: prompt }] },
+      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 45000 });
     const text = res.data?.content?.[0]?.text || '';
     const m = text.match(/\{[\s\S]*\}/);
     if (m) {
       const parsed = JSON.parse(m[0]);
-      return { executiveSummary: parsed.summary || parsed.executiveSummary || '', revenueImpact: parsed.revenueImpact || '', topPriorities: parsed.topPriorities || [], quickWins: parsed.quickWins || [], whatYoureDoingWell: parsed.whatYoureDoingWell || [], competitorIntel: parsed.competitorIntel || '', monthlyGoal: parsed.monthlyGoal || '', businessIntelligence: bizIntel || null };
+      console.log('[INSIGHTS] Complete.');
+      return {
+        executiveSummary: parsed.summary || parsed.executiveSummary || '', revenueImpact: parsed.revenueImpact || '',
+        topPriorities: parsed.topPriorities || [], quickWins: parsed.quickWins || [],
+        whatYoureDoingWell: parsed.whatYoureDoingWell || [], competitorIntel: parsed.competitorIntel || '',
+        monthlyGoal: parsed.monthlyGoal || '', businessIntelligence: bizIntel || null,
+        operationalInsights: parsed.operationalInsights || [], marketOpportunities: parsed.marketOpportunities || [],
+      };
     }
-    return { executiveSummary: text.slice(0, 300), topPriorities: [], quickWins: [], businessIntelligence: bizIntel || null };
-  } catch (e) { console.error(`[INSIGHTS] Failed: ${e.message}`); return { executiveSummary: '', topPriorities: [], quickWins: [], businessIntelligence: null }; }
+    return { executiveSummary: text.slice(0, 300), topPriorities: [], quickWins: [], businessIntelligence: bizIntel || null, operationalInsights: [], marketOpportunities: [] };
+  } catch (e) { console.error(`[INSIGHTS] Failed: ${e.message}`); return { executiveSummary: '', topPriorities: [], quickWins: [], businessIntelligence: null, operationalInsights: [], marketOpportunities: [] }; }
 }
 
 // ══════════════════════════════════════════════════
@@ -566,7 +721,7 @@ async function runFullScan({ businessName, city, state, website, facebookUrl, ye
 
   // Step 4: Parallel — web research + platform checks + competitors
   const [webResearchR, facebookR, yelpR, compR, napR, reviewsR] = await Promise.allSettled([
-    researchBusinessOnWeb(businessName, authorityCity, authorityState, siteUrl, socialLinks),
+    researchBusinessOnWeb(businessName, authorityCity, authorityState, siteUrl, socialLinks, google),
     checkFacebookPage(fbUrl),
     checkYelpPage(ylpUrl),
     checkCompetitors(businessName, authorityCity, authorityState, google),
@@ -601,7 +756,7 @@ async function runFullScan({ businessName, city, state, website, facebookUrl, ye
 
   // Step 5: AI insights (sequential — needs bizIntel for competitor analysis)
   const insights = await generateInsights(businessName, authorityCity, authorityState, platforms, overallScore, { industry, biggestChallenge, competitors: compData, webResearch });
-  const competitorAnalysis = await generateCompetitorAnalysis(businessName, authorityCity, authorityState, platforms, compData, insights.businessIntelligence);
+  const competitorAnalysis = await generateCompetitorAnalysis(businessName, authorityCity, authorityState, platforms, compData, insights.businessIntelligence, { webResearch });
 
   // Assemble findings (only from non-excluded platforms)
   const sev = { critical: 0, warning: 1, good: 2 };
@@ -682,6 +837,8 @@ async function runFullScan({ businessName, city, state, website, facebookUrl, ye
     topPriorities: insights.topPriorities || [], whatYoureDoingWell: insights.whatYoureDoingWell || [],
     competitorIntel: insights.competitorIntel || '', monthlyGoal: insights.monthlyGoal || '',
     businessIntelligence: insights.businessIntelligence || null,
+    operationalInsights: insights.operationalInsights || [],
+    marketOpportunities: insights.marketOpportunities || [],
     reportHeadline: tieredHeadline, lossSummary: tieredLoss,
     quickWins: salesQuickWins, priorityFix: tieredPriorityFix,
     competitorSummary: plan === 'basic' ? '' : competitorSummary,
