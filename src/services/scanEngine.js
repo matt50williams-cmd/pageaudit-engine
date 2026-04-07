@@ -657,32 +657,121 @@ Return ONLY valid JSON:
 }
 
 // ══════════════════════════════════════════════════
+// BUSINESS INTELLIGENCE (extracted from website HTML)
+// ══════════════════════════════════════════════════
+async function extractBusinessIntelligence(html, googleData, businessName, city, state) {
+  if (!html || html.length < 500 || !process.env.ANTHROPIC_API_KEY) return null;
+
+  try {
+    const truncatedHtml = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                               .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                               .replace(/<[^>]+>/g, ' ')
+                               .replace(/\s+/g, ' ')
+                               .trim()
+                               .substring(0, 4000);
+
+    const prompt = `You are analyzing the website of a local business to extract structured intelligence for an audit report.
+
+BUSINESS: ${businessName}, ${city} ${state || ''}
+GOOGLE CATEGORIES: ${(googleData?.types || []).join(', ') || 'unknown'}
+GOOGLE DESCRIPTION: ${googleData?.description || 'none'}
+
+WEBSITE TEXT:
+${truncatedHtml}
+
+Extract and return ONLY a JSON object with these fields:
+{
+  "primaryService": "their #1 main service in plain English (e.g. HVAC installation and repair)",
+  "secondaryServices": ["up to 4 other services they offer"],
+  "serviceArea": "geographic area they serve based on website content",
+  "targetCustomer": "who they primarily serve (residential, commercial, both)",
+  "uniqueValueProp": "what makes them different or their main selling point if stated",
+  "yearsInBusiness": "if mentioned, otherwise null",
+  "certifications": ["any licenses, certifications, or awards mentioned"],
+  "emergencyService": true or false,
+  "brands": ["equipment brands or partners mentioned"],
+  "missingFromWebsite": ["important things a business like this should have on their site but doesn't — be specific"]
+}
+
+Return ONLY the JSON object. No explanation. No markdown.`;
+
+    console.log('[BIZ-INTEL] Extracting business intelligence from website HTML...');
+    const res = await axios.post('https://api.anthropic.com/v1/messages',
+      { model: 'claude-haiku-4-5-20251001', max_tokens: 600, messages: [{ role: 'user', content: prompt }] },
+      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 15000 }
+    );
+    const text = res.data?.content?.[0]?.text || '';
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      console.log('[BIZ-INTEL] Extracted:', parsed.primaryService, '|', parsed.targetCustomer);
+      return parsed;
+    }
+    console.log('[BIZ-INTEL] No JSON in response');
+    return null;
+  } catch (e) {
+    console.error('[BIZ-INTEL] Failed:', e.message);
+    return null;
+  }
+}
+
+// ══════════════════════════════════════════════════
 // AI INSIGHTS (Claude Haiku)
 // ══════════════════════════════════════════════════
 async function generateInsights(biz, city, state, platforms, score, extra) {
   console.log('[INSIGHTS] Called. Score:', score, 'Platforms:', Object.keys(platforms || {}).join(', '));
-  if (!process.env.ANTHROPIC_API_KEY) { console.log('[INSIGHTS] No ANTHROPIC_API_KEY'); return { executiveSummary: '', topPriorities: [], quickWins: [], whatYoureDoingWell: [], competitorIntel: '', monthlyGoal: '', revenueImpact: '' }; }
+  if (!process.env.ANTHROPIC_API_KEY) { console.log('[INSIGHTS] No ANTHROPIC_API_KEY'); return { executiveSummary: '', topPriorities: [], quickWins: [], whatYoureDoingWell: [], competitorIntel: '', monthlyGoal: '', revenueImpact: '', businessIntelligence: null }; }
 
-  const p = platforms, comp = extra.competitors;
-  const prompt = `You are a senior digital marketing consultant writing a paid audit report for a local business. Be specific and reference their actual numbers.
+  const p = platforms;
+
+  // Extract business intelligence from website HTML before building the prompt
+  const bizIntel = await extractBusinessIntelligence(
+    p.website?.html, p.google, biz, city, state
+  );
+
+  const bizIntelSection = bizIntel ? `
+BUSINESS INTELLIGENCE (extracted from their actual website):
+- Primary Service: ${bizIntel.primaryService}
+- Other Services: ${bizIntel.secondaryServices?.join(', ') || 'none found'}
+- Service Area: ${bizIntel.serviceArea}
+- Serves: ${bizIntel.targetCustomer}
+- Value Proposition: ${bizIntel.uniqueValueProp || 'not clearly stated on website'}
+- Years in Business: ${bizIntel.yearsInBusiness || 'not stated'}
+- Certifications/Licenses: ${bizIntel.certifications?.join(', ') || 'none mentioned'}
+- Emergency Service: ${bizIntel.emergencyService ? 'Yes' : 'No/Not mentioned'}
+- Missing from Website: ${bizIntel.missingFromWebsite?.join(', ') || 'none identified'}
+` : '';
+
+  const reviewThemes = p.reviews?.sentiment ? `
+WHAT CUSTOMERS SAY:
+- Praise: ${p.reviews.sentiment.praiseThemes?.join(', ') || 'none identified'}
+- Complaints: ${p.reviews.sentiment.complaintThemes?.join(', ') || 'none identified'}
+- Sentiment Score: ${p.reviews.sentiment.sentimentScore}/10
+` : '';
+
+  const prompt = `You are a local business digital marketing expert writing a premium audit report. You have deep knowledge of this specific business — use it. Do NOT give generic advice. Every recommendation must be specific to what this business actually does and who they serve.
 
 BUSINESS: ${biz}, ${city} ${state || ''}
 INDUSTRY: ${extra.industry || 'local business'}
+BIGGEST CHALLENGE OWNER MENTIONED: ${extra.biggestChallenge || 'not provided'}
 OVERALL SCORE: ${score}/100
+${bizIntelSection}
+${reviewThemes}
+PLATFORM SCORES:
+- Google Business Profile: ${p.google?.rawScore || 0}/35 — Rating: ${p.google?.rating || 'N/A'}, Reviews: ${p.google?.reviewCount || 0}, Has Description: ${p.google?.hasDescription || false}, Days Since Last Review: ${p.google?.daysSinceReview || 'unknown'}
+- Website: ${p.website?.rawScore || 0}/25 — PageSpeed: ${p.website?.perfScore || 'N/A'}/100, SSL: ${p.website?.hasSSL ? 'Yes' : 'No'}
+- NAP Consistency: ${p.nap?.rawScore || 0}/10${p.nap?.excluded ? ' (excluded)' : ''}
+- Review Sentiment: ${p.reviews?.rawScore || 0}/10
+- Facebook: ${p.facebook?.excluded ? 'Not scanned' : `${p.facebook?.rawScore || 0}/10 — Followers: ${p.facebook?.followers || 'N/A'}, Recent Posts: ${p.facebook?.postCount || 0}`}
+- Yelp: ${p.yelp?.excluded ? 'Not scanned' : `${p.yelp?.rawScore || 0}/10 — Rating: ${p.yelp?.rating || 'N/A'}, Reviews: ${p.yelp?.reviewCount || 0}`}
 
-PLATFORM DATA:
-- Google: ${p.google?.rawScore||0}/35. Rating: ${p.google?.rating||'N/A'}. Reviews: ${p.google?.reviewCount||0}. Response rate: ${p.google?.responseRate||0}%
-- Website: ${p.website?.rawScore||0}/25. PageSpeed: ${p.website?.perfScore||'N/A'}. SSL: ${p.website?.hasSSL?'Yes':'No'}
-- Search: ${p.search?.rawScore||0}/20${p.search?.excluded?' (excluded)':''}
-- NAP: ${p.nap?.rawScore||0}/10${p.nap?.excluded?' (excluded)':''}
-- Reviews: ${p.reviews?.rawScore||0}/10
-- Facebook: ${p.facebook?.rawScore||0}/10${p.facebook?.excluded?' (excluded)':''}. Followers: ${p.facebook?.followers||'N/A'}. Posts found: ${p.facebook?.postCount||0}. Avg likes: ${p.facebook?.avgLikes||0}
-- Yelp: ${p.yelp?.rawScore||0}/10${p.yelp?.excluded?' (excluded)':''}. Rating: ${p.yelp?.rating||'N/A'}. Reviews: ${p.yelp?.reviewCount||0}. Photos: ${p.yelp?.photos||0}
-${comp?.competitors?.length ? 'COMPETITORS: ' + JSON.stringify(comp.competitors.slice(0,3).map(c=>({name:c.name,rating:c.rating,reviews:c.reviewCount}))) : ''}
+COMPETITORS IN AREA:
+${(extra.competitors?.competitors || []).slice(0, 3).map((c, i) => `${i + 1}. ${c.name} — ${c.rating || 'unrated'} stars, ${c.reviewCount || 0} reviews`).join('\n') || 'No competitor data available'}
+${extra.competitors?.ranking ? `This business ranks #${extra.competitors.ranking} of ${extra.competitors.totalInArea} in the area.` : ''}
 
 You MUST respond with ONLY a JSON object. No markdown. No backticks. No explanation. Just the raw JSON starting with {
 
-{"summary":"2-3 sentence executive summary specific to this business with their actual numbers","revenueImpact":"Estimated monthly revenue lost due to gaps found","topPriorities":[{"priority":1,"title":"specific action title","description":"exactly what to do and why","timeToComplete":"X minutes","estimatedROI":"$X-Y per month","difficulty":"easy"},{"priority":2,"title":"second action","description":"what to do","timeToComplete":"X minutes","estimatedROI":"$X per month","difficulty":"medium"},{"priority":3,"title":"third action","description":"what to do","timeToComplete":"X minutes","estimatedROI":"$X per month","difficulty":"easy"}],"quickWins":["One specific free fix today","Another specific free fix","A third specific free fix"],"whatYoureDoingWell":["specific positive with numbers","another positive"],"competitorIntel":"what competitors do that this business does not","monthlyGoal":"one measurable goal for next 30 days"}`;
+{"summary":"2-3 sentences that reference their actual services, real numbers, and specific competitive position — not generic","revenueImpact":"Specific monthly revenue impact estimate based on their industry and score gaps","topPriorities":[{"priority":1,"title":"specific to their business","description":"what to do and why it matters for THIS business","timeToComplete":"X hours/days","estimatedROI":"specific dollar or % estimate","difficulty":"easy"},{"priority":2,"title":"second action","description":"what to do","timeToComplete":"X hours/days","estimatedROI":"specific estimate","difficulty":"medium"},{"priority":3,"title":"third action","description":"what to do","timeToComplete":"X hours/days","estimatedROI":"specific estimate","difficulty":"easy"}],"quickWins":["specific free action referencing their actual gaps","another","third"],"whatYoureDoingWell":["specific strength with actual numbers"],"competitorIntel":"what specific competitors are doing better and exactly what to do about it","monthlyGoal":"one specific measurable 30-day goal for THIS business"}`;
 
   console.log('[INSIGHTS] Calling Claude Haiku...');
   try {
@@ -707,10 +796,11 @@ You MUST respond with ONLY a JSON object. No markdown. No backticks. No explanat
           whatYoureDoingWell: parsed.whatYoureDoingWell || parsed.doingWell || [],
           competitorIntel: parsed.competitorIntel || '',
           monthlyGoal: parsed.monthlyGoal || '',
+          businessIntelligence: bizIntel || null,
         };
       } catch (parseErr) {
         console.log('[INSIGHTS] JSON parse FAILED:', parseErr.message, '| Raw:', jsonMatch[0].slice(0, 200));
-        return { executiveSummary: text.slice(0, 300), topPriorities: [], quickWins: [] };
+        return { executiveSummary: text.slice(0, 300), topPriorities: [], quickWins: [], businessIntelligence: bizIntel || null };
       }
     }
 
@@ -1021,6 +1111,7 @@ async function runFullScan({ businessName, city, state, website, facebookUrl, ye
     topPriorities: insights.topPriorities || [],
     whatYoureDoingWell: insights.whatYoureDoingWell || [],
     competitorIntel: insights.competitorIntel || '', monthlyGoal: insights.monthlyGoal || '',
+    businessIntelligence: insights.businessIntelligence || null,
     // Sales power fields (tier-adjusted)
     reportHeadline: tieredHeadline,
     lossSummary: tieredLoss,
