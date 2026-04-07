@@ -332,6 +332,7 @@ async function researchBusinessOnWeb(businessName, city, state, website, socialL
   const businessType = primaryType ? primaryType.replace(/_/g, ' ') : 'local business';
 
   try {
+    console.log(`[WEB RESEARCH] Using model: claude-sonnet-4-5-20250514, API key: ${process.env.ANTHROPIC_API_KEY ? 'SET (' + process.env.ANTHROPIC_API_KEY.slice(0, 8) + '...)' : 'MISSING'}`);
     console.log(`[WEB RESEARCH] Deep research starting for ${businessName} (${businessType})...`);
     const res = await axios.post('https://api.anthropic.com/v1/messages', {
       model: 'claude-sonnet-4-5-20250514',
@@ -404,7 +405,9 @@ After ALL searches are complete, return ONLY a JSON object with this exact struc
     }
     return null;
   } catch (e) {
-    console.error(`[WEB RESEARCH] Failed: ${e.message}`);
+    console.error(`[WEB RESEARCH] FAILED: ${e.message}`);
+    console.error(`[WEB RESEARCH] Status: ${e.response?.status}`);
+    console.error(`[WEB RESEARCH] Response: ${JSON.stringify(e.response?.data)?.slice(0, 500)}`);
     return null;
   }
 }
