@@ -30,6 +30,59 @@ setInterval(() => {
 
 async function scanRoutes(fastify) {
 
+  // ── IDENTIFY BUSINESS FROM WEBSITE URL ──
+  fastify.post('/api/scan/identify-from-website', async (request, reply) => {
+    const { websiteUrl } = request.body || {};
+    if (!websiteUrl) return reply.status(400).send({ error: 'websiteUrl is required' });
+
+    let url = websiteUrl.trim();
+    if (!url.startsWith('http')) url = 'https://' + url;
+
+    try {
+      // Fetch the website HTML
+      console.log(`[IDENTIFY] Fetching: ${url}`);
+      const siteRes = await axios.get(url, { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0 Chrome/120 Safari/537.36' }, maxRedirects: 5 });
+      const html = (siteRes.data || '').substring(0, 50000);
+      const text = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 4000);
+      const title = (html.match(/<title[^>]*>([^<]+)/i) || [])[1]?.trim() || '';
+
+      if (!process.env.ANTHROPIC_API_KEY) {
+        // Fallback: extract from title tag
+        return reply.send({ success: true, businessName: title || url, city: '', state: '', primaryService: '', source: 'title_only' });
+      }
+
+      // Use Claude Haiku to extract business info
+      const prompt = `Extract business information from this website content.
+
+WEBSITE URL: ${url}
+PAGE TITLE: ${title}
+PAGE CONTENT:
+${text}
+
+Return ONLY a JSON object:
+{"businessName":"exact business name","city":"city where business is located","state":"2-letter state code","primaryService":"what they do in 2-4 words"}
+
+If you cannot determine a field, use empty string. Do NOT guess — only extract what the content clearly states.`;
+
+      const aiRes = await axios.post('https://api.anthropic.com/v1/messages',
+        { model: 'claude-haiku-4-5-20251001', max_tokens: 200, messages: [{ role: 'user', content: prompt }] },
+        { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 10000 }
+      );
+      const aiText = aiRes.data?.content?.[0]?.text || '';
+      const jsonMatch = aiText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        console.log(`[IDENTIFY] Extracted: ${parsed.businessName} | ${parsed.city}, ${parsed.state} | ${parsed.primaryService}`);
+        return reply.send({ success: true, businessName: parsed.businessName || title || '', city: parsed.city || '', state: parsed.state || '', primaryService: parsed.primaryService || '', website: url, source: 'ai' });
+      }
+
+      return reply.send({ success: true, businessName: title || '', city: '', state: '', primaryService: '', website: url, source: 'fallback' });
+    } catch (err) {
+      console.error('[IDENTIFY] Error:', err.message);
+      return reply.status(200).send({ success: false, businessName: '', city: '', state: '', primaryService: '', website: url, error: err.message });
+    }
+  });
+
   // ── TEASER SCAN (free, rate limited) ──
   fastify.post('/api/scan/teaser', async (request, reply) => {
     const ip = request.ip || request.headers['x-forwarded-for'] || 'unknown';
