@@ -342,7 +342,10 @@ async function checkCompetitors(businessName, city, state, googleData) {
 async function researchBusinessOnWeb(businessName, city, state, website, socialLinks, googleData) {
   if (!process.env.ANTHROPIC_API_KEY) return null;
 
-  const primaryType = (googleData?.types || []).find(t => !['establishment', 'point_of_interest', 'local_business'].includes(t));
+  const PRIORITY_TYPES = ['hvac_contractor', 'heating_contractor', 'air_conditioning_contractor'];
+  const GENERIC = ['establishment', 'point_of_interest', 'local_business', 'electrician', 'general_contractor'];
+  const types = googleData?.types || [];
+  let primaryType = types.find(t => PRIORITY_TYPES.includes(t)) || types.find(t => !GENERIC.includes(t)) || types.find(t => !['establishment', 'point_of_interest', 'local_business'].includes(t));
   const businessType = primaryType ? primaryType.replace(/_/g, ' ') : 'local business';
 
   try {
@@ -517,7 +520,7 @@ Return ONLY JSON:
     console.log(`[COMPETITORS] Generating analysis (Sonnet, ${hasDeepData ? 'deep data' : 'Google data'})...`);
     const res = await axios.post('https://api.anthropic.com/v1/messages',
       { model: 'claude-sonnet-4-5', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] },
-      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 30000 });
+      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 60000 });
     const text = res.data?.content?.[0]?.text || '';
     const m = text.match(/\{[\s\S]*\}/);
     if (m) { const p = JSON.parse(m[0]); console.log('[COMPETITORS] Analysis complete.'); return { comparisonSummary: p.comparisonSummary || '', keyGaps: p.keyGaps || [], whereCompetitive: p.whereCompetitive || [], opportunitiesToWin: p.opportunitiesToWin || [] }; }
@@ -624,7 +627,7 @@ Return ONLY a JSON object:
     console.log('[INSIGHTS] Generating with full research context (Sonnet)...');
     const res = await axios.post('https://api.anthropic.com/v1/messages',
       { model: 'claude-sonnet-4-5', max_tokens: 3000, messages: [{ role: 'user', content: prompt }] },
-      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 45000 });
+      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 90000 });
     const text = res.data?.content?.[0]?.text || '';
     const m = text.match(/\{[\s\S]*\}/);
     if (m) {

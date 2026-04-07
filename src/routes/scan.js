@@ -173,7 +173,9 @@ If you cannot determine a field, use empty string. Do NOT guess — only extract
     await queryOne('UPDATE audits SET status = $1, updated_at = NOW() WHERE id = $2', ['analyzing', auditId]);
 
     try {
+      console.log(`[FULL SCAN] selected_competitors from DB:`, audit.selected_competitors ? JSON.stringify(audit.selected_competitors).slice(0, 200) : 'NULL');
       const selectedComps = audit.selected_competitors ? (typeof audit.selected_competitors === 'string' ? JSON.parse(audit.selected_competitors) : audit.selected_competitors) : null;
+      console.log(`[FULL SCAN] Parsed selectedComps:`, selectedComps ? `${selectedComps.length} competitors` : 'null');
       const result = await runFullScan({ businessName, city, state: state || '', website, facebookUrl, yelpUrl, industry, biggestChallenge, plan: audit.plan || 'basic', selectedCompetitors: selectedComps });
 
       if (result.error) {
@@ -318,7 +320,9 @@ If you cannot determine a field, use empty string. Do NOT guess — only extract
         'hair_care': 'hair salon barber', 'beauty_salon': 'beauty salon spa',
         'veterinary_care': 'veterinarian vet',
       };
-      const primaryUsefulType = usefulTypes[0] || null;
+      const HVAC_TYPES = ['hvac_contractor', 'heating_contractor', 'air_conditioning_contractor'];
+      const DEPRIORITIZE = ['electrician', 'general_contractor'];
+      const primaryUsefulType = usefulTypes.find(t => HVAC_TYPES.includes(t)) || usefulTypes.find(t => !DEPRIORITIZE.includes(t)) || usefulTypes[0] || null;
       const businessType = TYPE_TO_QUERY[primaryUsefulType] || (primaryUsefulType ? primaryUsefulType.replace(/_/g, ' ') : businessName.split(/\s+/).slice(0, 2).join(' '));
       console.log(`[COMPETITOR-PICKER] Subject: ${subject?.name || businessName} | Types: ${rawTypes.join(', ')} | Search keyword: "${businessType}"`);
 
@@ -371,11 +375,12 @@ If you cannot determine a field, use empty string. Do NOT guess — only extract
   fastify.post('/api/audits/:id/select-competitors', async (request, reply) => {
     const auditId = parseInt(request.params.id);
     const { selectedCompetitors } = request.body || {};
+    console.log(`[COMP-PICKER] Saving ${selectedCompetitors?.length || 0} competitors for audit ${auditId}`);
+    console.log(`[COMP-PICKER] Competitors:`, JSON.stringify(selectedCompetitors));
 
     const audit = await queryOne('SELECT id, paid FROM audits WHERE id = $1', [auditId]);
     if (!audit) return reply.status(404).send({ error: 'Audit not found' });
 
-    // selectedCompetitors is an array of {placeId, name, address, rating, reviewCount}
     const comps = Array.isArray(selectedCompetitors) ? selectedCompetitors.slice(0, 3) : [];
 
     try {
