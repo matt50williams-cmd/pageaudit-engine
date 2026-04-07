@@ -149,14 +149,20 @@ async function checkWebsite(websiteUrl) {
 // ══════════════════════════════════════════════════
 // CHECK 3: SEARCH VISIBILITY (20pts max)
 // ══════════════════════════════════════════════════
-async function checkSearchVisibility(businessName, city, state, businessType) {
+async function checkSearchVisibility(businessName, city, state, businessType, googleData) {
   const dfsLogin = process.env.DATAFORSEO_LOGIN, dfsPass = process.env.DATAFORSEO_PASSWORD;
   if (!dfsLogin || !dfsPass) {
     console.log('[SCAN] DataForSEO: no credentials');
     return { rawScore: 0, maxScore: 20, excluded: true, findings: [], dataPoints: 0 };
   }
 
-  console.log(`[SCAN] Search visibility: ${businessType} ${city} ${state}`);
+  // FIX 3: Use only the primary specific type for keyword ranking checks
+  const GENERIC_TYPES = ['establishment', 'point_of_interest', 'local_business', 'store', 'business', 'premise', 'sublocality', 'neighborhood'];
+  const primaryType = (googleData?.types || []).find(t => !GENERIC_TYPES.includes(t));
+  const primaryKeyword = primaryType ? primaryType.replace(/_/g, ' ') : (businessType || 'local business');
+  const hasRealGooglePresence = (googleData?.rating > 0 || (googleData?.reviewCount || 0) > 5);
+
+  console.log(`[SCAN] Search visibility: primaryKeyword="${primaryKeyword}" (from type: ${primaryType || 'none'}) city=${city} ${state}`);
   const auth = Buffer.from(`${dfsLogin}:${dfsPass}`).toString('base64');
   const dfs = async (endpoint, body) => {
     const r = await ax.post(`https://api.dataforseo.com/v3/${endpoint}`, body, { headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' }, timeout: 20000 });
@@ -165,7 +171,7 @@ async function checkSearchVisibility(businessName, city, state, businessType) {
 
   let raw = 0, dataPoints = 0;
   const findings = [];
-  const keyword = `${businessType || 'business'} ${city} ${state}`.trim();
+  const keyword = `${primaryKeyword} ${city} ${state}`.trim();
 
   // Maps 3-pack (10pts)
   try {
@@ -175,7 +181,8 @@ async function checkSearchVisibility(businessName, city, state, businessType) {
     dataPoints += items.length * 3;
     if (pos >= 0 && pos < 3) { raw += 10; findings.push(F('Search', 'good', `#${pos + 1} in Google Maps 3-pack`, 'You appear in the top 3 map results.', '', '')); }
     else if (pos >= 0) { raw += 5; findings.push(F('Search', 'warning', `#${pos + 1} in Google Maps — not in top 3`, '70% of clicks go to top 3 results only.', '', 'Improve Google profile: more reviews, photos, and responses.')); }
-    else findings.push(F('Search', 'critical', 'Not in Google Maps results', `Searched "${keyword}" — you didn't appear.`, '70% of local clicks go to Maps top 3.', 'Complete your Google Business Profile. Respond to reviews. Add photos.'));
+    else if (!hasRealGooglePresence) { findings.push(F('Search', 'critical', 'Not in Google Maps results', `Searched "${keyword}" — you didn't appear.`, '70% of local clicks go to Maps top 3.', 'Complete your Google Business Profile. Respond to reviews. Add photos.')); }
+    // FIX 1: Suppress "not found in maps" for businesses that clearly exist on Google
   } catch (e) { console.log(`[SCAN] DFS Maps: ${e.message}`); }
 
   // Organic ranking (5pts)
@@ -186,7 +193,8 @@ async function checkSearchVisibility(businessName, city, state, businessType) {
     dataPoints += items.length * 3;
     if (pos >= 0 && pos < 10) { raw += 5; findings.push(F('Search', 'good', `Page 1 organic for "${keyword}"`, '', '', '')); }
     else if (pos >= 0) { raw += 2; findings.push(F('Search', 'warning', `Page 2 for "${keyword}"`, 'Only 0.63% of users go to page 2.', '', 'Add your city and service to your website title tag.')); }
-    else findings.push(F('Search', 'critical', `Not ranking for "${keyword}"`, '', 'Customers searching this keyword don\'t find you.', 'Optimize your website for local SEO. Add city + service to title tag.'));
+    else if (!hasRealGooglePresence) { findings.push(F('Search', 'critical', `Not ranking for "${keyword}"`, '', 'Customers searching this keyword don\'t find you.', 'Optimize your website for local SEO. Add city + service to title tag.')); }
+    // FIX 1: Suppress "not ranking" for businesses that clearly exist on Google
   } catch (e) { console.log(`[SCAN] DFS Organic: ${e.message}`); }
 
   // Brand search (5pts)
@@ -310,6 +318,27 @@ async function checkNAP(googleData, websiteData) {
   // Business name (2pts)
   const nameLower = (googleData.name || '').toLowerCase();
   if (nameLower && html.includes(nameLower.split(' ')[0])) { raw += 2; dataPoints += 2; }
+
+  // FIX 5: Check for multiple domains
+  if (html) {
+    const domainMatches = html.match(/https?:\/\/([a-z0-9][-a-z0-9]*\.)+[a-z]{2,}/gi) || [];
+    const uniqueDomains = new Set();
+    for (const url of domainMatches) {
+      try {
+        const host = new URL(url).hostname.replace(/^www\./, '');
+        if (host && !host.includes('google') && !host.includes('facebook') && !host.includes('yelp') && !host.includes('instagram') && !host.includes('twitter') && !host.includes('linkedin') && !host.includes('youtube') && !host.includes('gstatic') && !host.includes('googleapis') && host.length > 5) {
+          uniqueDomains.add(host);
+        }
+      } catch {}
+    }
+    const googleDomain = googleData.website ? new URL(googleData.website).hostname.replace(/^www\./, '') : null;
+    if (uniqueDomains.size > 1 && googleDomain) {
+      const otherDomains = [...uniqueDomains].filter(d => d !== googleDomain);
+      if (otherDomains.length > 0) {
+        findings.push(F('NAP', 'warning', 'Multiple website domains detected', `Your website references ${uniqueDomains.size} different domains. Google may be confused about which is your primary website.`, 'Multiple domains with your business info can dilute your search authority and confuse customers.', `Make sure all pages point to one primary domain. If you have old domains, set up redirects to your main site.`));
+      }
+    }
+  }
 
   // Bing check (2pts)
   try {
@@ -685,11 +714,14 @@ ${bizContext}
 THEIR LOCAL COMPETITORS:
 ${compDetails}
 
-Write a competitive analysis that:
-1. Names specific competitors and what they do BETTER
-2. Identifies where the subject business has an advantage
-3. Gives concrete actions to close specific gaps
-4. References actual numbers and competitor names throughout
+For each competitor, analyze:
+- What services they emphasize that overlap with the subject business
+- Whether they appear to serve the same geographic area
+- One specific thing they do better online (more reviews, better description, more photos, etc.)
+- One specific vulnerability or gap the subject business could exploit
+
+Do NOT just list star ratings. Give actionable competitive intelligence.
+Write a competitive analysis that names specific competitors, references actual numbers, and explains what a real customer would see when comparing these businesses.
 
 Return ONLY valid JSON:
 {
@@ -1034,13 +1066,23 @@ async function runFullScan({ businessName, city, state, website, facebookUrl, ye
   catch (e) { console.error('[SCAN] Google CRASH:', e.message); return { error: 'Google check failed.', businessName, city, state, scannedAt: new Date().toISOString() }; }
 
   const siteUrl = website || google.website || null;
-  const businessType = (google.types || [])[0]?.replace(/_/g, ' ') || industry || 'business';
+
+  // FIX 2: Use Google's authoritative location data when available
+  const authorityCity = google.address?.split(',').slice(-3, -2)[0]?.trim() || google.address?.split(',')[1]?.trim() || city;
+  const authorityState = google.address?.match(/\b([A-Z]{2})\s*\d{5}/)?.[ 1] || state;
+  console.log(`[SCAN] Authority location: city="${authorityCity}" state="${authorityState}" (from Google: "${google.address || 'N/A'}")`);
+
+  // FIX 3: Use primary specific type only, skip generic
+  const GENERIC_TYPES_SCAN = ['establishment', 'point_of_interest', 'local_business', 'store', 'business', 'premise', 'sublocality', 'neighborhood'];
+  const primaryType = (google.types || []).find(t => !GENERIC_TYPES_SCAN.includes(t));
+  const businessType = primaryType ? primaryType.replace(/_/g, ' ') : (industry || 'business');
+  console.log(`[SCAN] Business type: "${businessType}" (from Google type: ${primaryType || 'none'})`);
 
   // Parallel checks
   const [webR, searchR, compR, fbR, yelpR] = await Promise.allSettled([
     checkWebsite(siteUrl),
-    checkSearchVisibility(businessName, city, state, businessType),
-    checkCompetitors(businessName, city, state, google),
+    checkSearchVisibility(businessName, authorityCity, authorityState, businessType, google),
+    checkCompetitors(businessName, authorityCity, authorityState, google),
     checkFacebook(facebookUrl),
     checkYelp(yelpUrl),
   ]);
@@ -1082,8 +1124,8 @@ async function runFullScan({ businessName, city, state, website, facebookUrl, ye
   const scoreLabel = getScoreLabel(overallScore);
 
   // Run insights first to extract businessIntelligence, then use it for competitor analysis
-  const insights = await generateInsights(businessName, city, state, platforms, overallScore, { industry, biggestChallenge, competitors: compData });
-  const competitorAnalysis = await generateCompetitorAnalysis(businessName, city, state, platforms, compData, insights.businessIntelligence);
+  const insights = await generateInsights(businessName, authorityCity, authorityState, platforms, overallScore, { industry, biggestChallenge, competitors: compData });
+  const competitorAnalysis = await generateCompetitorAnalysis(businessName, authorityCity, authorityState, platforms, compData, insights.businessIntelligence);
 
   const sev = { critical: 0, warning: 1, good: 2 };
   // Only include findings from platforms that actually returned data (not excluded)
