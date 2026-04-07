@@ -203,7 +203,7 @@ async function scanRoutes(fastify) {
     });
   });
 
-  // ── COMPETITOR OPTIONS (for picker) ──
+  // ── COMPETITOR OPTIONS (for picker) — uses Text Search like a real customer ──
   fastify.post('/api/scan/competitor-options', async (request, reply) => {
     const { businessName, city, state } = request.body || {};
     if (!businessName || !city) return reply.status(400).send({ error: 'businessName and city required' });
@@ -212,54 +212,59 @@ async function scanRoutes(fastify) {
     if (!apiKey) return reply.status(500).send({ error: 'Google API not configured' });
 
     try {
-      // Find the subject business first
+      // Step 1: Find the subject business to get place_id and types
       const findRes = await axios.get('https://maps.googleapis.com/maps/api/place/findplacefromtext/json', {
-        params: { input: `${businessName} ${city} ${state || ''}`, inputtype: 'textquery', fields: 'place_id,name,types,formatted_address', key: apiKey },
+        params: { input: `${businessName} ${city} ${state || ''}`, inputtype: 'textquery', fields: 'place_id,name,types', key: apiKey },
         timeout: 8000,
       });
       const subject = findRes.data?.candidates?.[0];
       const subjectPlaceId = subject?.place_id || null;
       const rawTypes = subject?.types || [];
-      // Build keyword from Google types — replace underscores, skip generic types
-      const skipTypes = ['point_of_interest', 'establishment', 'premise', 'street_address', 'political', 'locality'];
+
+      // Step 2: Extract the most specific business type for the search query
+      const skipTypes = ['point_of_interest', 'establishment', 'premise', 'street_address', 'political', 'locality', 'sublocality', 'neighborhood', 'route', 'geocode'];
       const usefulTypes = rawTypes.filter(t => !skipTypes.includes(t));
-      const keyword = usefulTypes.length > 0 ? usefulTypes[0].replace(/_/g, ' ') : businessName.split(/\s+/).slice(0, 2).join(' ');
-      console.log(`[COMPETITOR-PICKER] Subject: ${subject?.name || businessName} | Google types: ${rawTypes.join(', ')} | Search keyword: "${keyword}"`);
+      const businessType = usefulTypes.length > 0 ? usefulTypes[0].replace(/_/g, ' ') : businessName.split(/\s+/).slice(0, 2).join(' ');
+      console.log(`[COMPETITOR-PICKER] Subject: ${subject?.name || businessName} | Types: ${rawTypes.join(', ')} | Business type: "${businessType}"`);
 
-      // Geocode for nearby search center
-      const geo = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
-        params: { address: subject?.formatted_address || `${businessName} ${city} ${state || ''}`, key: apiKey },
-        timeout: 5000,
-      });
-      const loc = geo.data?.results?.[0]?.geometry?.location;
-      if (!loc) return reply.status(404).send({ error: 'Could not locate business area' });
-
-      // Search using keyword only (type param fails for specialized categories like hvac_contractor)
-      let results = [];
-      const searches = [
-        { location: `${loc.lat},${loc.lng}`, radius: 15000, keyword, key: apiKey },
-        { location: `${loc.lat},${loc.lng}`, radius: 30000, keyword, key: apiKey },
-        { location: `${loc.lat},${loc.lng}`, radius: 30000, keyword: `${keyword} ${city}`, key: apiKey },
+      // Step 3: Text Search — search exactly like a customer would
+      const allResults = new Map(); // placeId → result (dedup)
+      const queries = [
+        `${businessType} ${city} ${state || ''}`,
+        `${businessType} near ${city} ${state || ''}`,
       ];
-      for (const params of searches) {
-        console.log(`[COMPETITOR-PICKER] Searching: keyword="${params.keyword}" radius=${params.radius}`);
-        const r = await axios.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', { params, timeout: 8000 });
-        const filtered = (r.data?.results || []).filter(p => p.place_id !== subjectPlaceId);
-        console.log(`[COMPETITOR-PICKER] Got ${filtered.length} results`);
-        if (filtered.length > results.length) results = filtered;
-        if (results.length >= 8) break;
+
+      for (const query of queries) {
+        console.log(`[COMPETITOR-PICKER] Text search: "${query}"`);
+        try {
+          const r = await axios.get('https://maps.googleapis.com/maps/api/place/textsearch/json', {
+            params: { query, key: apiKey },
+            timeout: 8000,
+          });
+          const hits = r.data?.results || [];
+          console.log(`[COMPETITOR-PICKER] Got ${hits.length} results for "${query}"`);
+          for (const p of hits) {
+            if (p.place_id !== subjectPlaceId && !allResults.has(p.place_id)) {
+              allResults.set(p.place_id, p);
+            }
+          }
+        } catch (e) {
+          console.log(`[COMPETITOR-PICKER] Text search failed for "${query}": ${e.message}`);
+        }
+        if (allResults.size >= 10) break;
       }
 
-      const options = results.slice(0, 10).map(p => ({
+      // Step 4: Format results
+      const options = [...allResults.values()].slice(0, 10).map(p => ({
         placeId: p.place_id,
         name: p.name,
-        address: p.vicinity || '',
+        address: p.formatted_address || '',
         rating: p.rating || null,
         reviewCount: p.user_ratings_total || 0,
-        types: (p.types || []).slice(0, 3).map(t => t.replace(/_/g, ' ')),
+        types: (p.types || []).filter(t => !skipTypes.includes(t)).slice(0, 3).map(t => t.replace(/_/g, ' ')),
       }));
 
-      console.log(`[COMPETITOR-PICKER] Final: ${options.length} options for ${businessName} in ${city}`);
+      console.log(`[COMPETITOR-PICKER] Final: ${options.length} competitors for "${businessType}" in ${city}`);
       return reply.send({ success: true, options });
     } catch (err) {
       console.error('[COMPETITOR-PICKER] Error:', err.message);
