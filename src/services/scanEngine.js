@@ -150,6 +150,168 @@ async function checkCompetitors(businessName, city, state, googleData) {
 }
 
 // ══════════════════════════════════════════════════
+// COMPETITOR DEEP INTELLIGENCE (Claude Sonnet web search)
+// ══════════════════════════════════════════════════
+async function researchCompetitorDeep(competitorName, city, state, subjectBusinessName) {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+
+  try {
+    console.log(`[COMP-INTEL] Deep research: ${competitorName}`);
+
+    const res = await axios.post('https://api.anthropic.com/v1/messages', {
+      model: 'claude-sonnet-4-5',
+      max_tokens: 3000,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+      messages: [{
+        role: 'user',
+        content: `You are a competitive intelligence analyst. Research "${competitorName}" in ${city}, ${state} thoroughly. This research will be used by their competitor "${subjectBusinessName}" to understand the competitive landscape.
+
+Search for ALL of the following in order:
+1. "${competitorName} ${city} reviews" — find their overall reputation and what customers say
+2. "${competitorName} Google reviews" — find specific praise and complaint patterns
+3. "${competitorName} complaints" OR "${competitorName} problems" — find any issues
+4. "${competitorName} ${city}" alone — find their website, services, about page
+5. "${competitorName} Yelp" — find Yelp presence and what Yelp customers say differently than Google
+6. "${competitorName} BBB" — find any complaints or issues
+
+After ALL searches, analyze the data and return ONLY this JSON:
+{
+  "businessName": "exact name",
+  "googleRating": 0.0,
+  "googleReviewCount": 0,
+  "overallReputation": "1-2 sentence honest assessment",
+
+  "reviewAnalysis": {
+    "totalReviewsAnalyzed": 0,
+    "overallSentiment": "positive/mixed/negative",
+    "praiseThemes": [
+      {
+        "theme": "specific thing customers praise",
+        "frequency": "high/medium/low",
+        "examplePhrases": ["actual phrases customers use"]
+      }
+    ],
+    "complaintThemes": [
+      {
+        "theme": "specific complaint",
+        "frequency": "high/medium/low",
+        "trend": "increasing/stable/decreasing",
+        "examplePhrases": ["actual phrases"],
+        "lastSeenApprox": "recent/6 months ago/1+ years ago"
+      }
+    ],
+    "emergingProblems": ["problems appearing in recent reviews that weren't there before"],
+    "resolvedProblems": ["problems that appeared historically but seem fixed now"],
+    "ownerResponseRate": "high/medium/low/none — do they respond to reviews?",
+    "reviewVelocity": "rapidly growing/steady/slowing/declining"
+  },
+
+  "competitiveProfile": {
+    "primaryServices": ["main services they offer"],
+    "serviceStrengths": ["what they genuinely do well"],
+    "serviceWeaknesses": ["where they fall short"],
+    "pricingPosition": "budget/mid-range/premium/unknown",
+    "targetCustomer": "residential/commercial/both",
+    "uniqueAdvantages": ["what makes them stand out vs all competitors"],
+    "exploitableWeaknesses": ["specific weaknesses that ${subjectBusinessName} could win against"]
+  },
+
+  "threatAssessment": {
+    "overallThreatLevel": "high/medium/low",
+    "threatReason": "why they are or aren't a serious threat",
+    "theyAreWinningOn": ["specific things they beat competitors on"],
+    "theyAreLosingOn": ["specific things competitors beat them on"],
+    "momentumDirection": "gaining ground/holding steady/losing ground",
+    "momentumReason": "why their momentum is what it is"
+  },
+
+  "opportunitiesForSubject": [
+    "Specific thing ${subjectBusinessName} could do to win customers away from this competitor"
+  ],
+
+  "keyIntelligence": "2-3 sentence summary of the most important thing to know about this competitor"
+}`
+      }]
+    }, {
+      headers: {
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json'
+      },
+      timeout: 120000
+    });
+
+    const tb = res.data?.content?.find(b => b.type === 'text');
+    if (!tb) return null;
+    const m = tb.text.match(/\{[\s\S]*\}/);
+    if (m) {
+      const parsed = JSON.parse(m[0]);
+      console.log(`[COMP-INTEL] Done: ${competitorName} — Threat: ${parsed.threatAssessment?.overallThreatLevel}`);
+      return parsed;
+    }
+    return null;
+  } catch(e) {
+    console.error(`[COMP-INTEL] Failed for ${competitorName}: ${e.message}`);
+    return null;
+  }
+}
+
+async function analyzeCompetitorChanges(competitorName, previousSnapshot, currentSnapshot, subjectBusinessName) {
+  if (!previousSnapshot || !currentSnapshot || !process.env.ANTHROPIC_API_KEY) return null;
+
+  const ratingChange = (currentSnapshot.googleRating || 0) - (previousSnapshot.googleRating || 0);
+  const reviewChange = (currentSnapshot.googleReviewCount || 0) - (previousSnapshot.googleReviewCount || 0);
+
+  const prompt = `You are analyzing what changed for a competitor between two intelligence scans.
+
+COMPETITOR: ${competitorName}
+SUBJECT BUSINESS (your client): ${subjectBusinessName}
+
+PREVIOUS SCAN:
+- Rating: ${previousSnapshot.googleRating} stars (${previousSnapshot.googleReviewCount} reviews)
+- Top complaints then: ${previousSnapshot.reviewAnalysis?.complaintThemes?.map(c => c.theme).join(', ') || 'none recorded'}
+- Threat level: ${previousSnapshot.threatAssessment?.overallThreatLevel}
+- Momentum: ${previousSnapshot.threatAssessment?.momentumDirection}
+
+CURRENT SCAN:
+- Rating: ${currentSnapshot.googleRating} stars (${currentSnapshot.googleReviewCount} reviews)
+- Rating change: ${ratingChange > 0 ? '+' : ''}${ratingChange.toFixed(1)} stars
+- Review count change: ${reviewChange > 0 ? '+' : ''}${reviewChange} reviews
+- New complaint themes: ${currentSnapshot.reviewAnalysis?.emergingProblems?.join(', ') || 'none'}
+- Resolved problems: ${currentSnapshot.reviewAnalysis?.resolvedProblems?.join(', ') || 'none'}
+- Current threat level: ${currentSnapshot.threatAssessment?.overallThreatLevel}
+- Current momentum: ${currentSnapshot.threatAssessment?.momentumDirection}
+
+Analyze what changed and what it means for ${subjectBusinessName}. Return ONLY JSON:
+{
+  "headline": "One punchy sentence summarizing the most important change",
+  "ratingChange": ${ratingChange},
+  "reviewCountChange": ${reviewChange},
+  "momentumShift": "improving/stable/declining",
+  "significantChanges": [
+    "Specific change with business implication for ${subjectBusinessName}"
+  ],
+  "newThreats": ["new things this competitor is doing that pose a threat"],
+  "newOpportunities": ["new weaknesses or problems that ${subjectBusinessName} can exploit"],
+  "recommendation": "Specific action ${subjectBusinessName} should take based on these changes",
+  "urgency": "high/medium/low"
+}`;
+
+  try {
+    const res = await axios.post('https://api.anthropic.com/v1/messages',
+      { model: 'claude-sonnet-4-5', max_tokens: 1000, messages: [{ role: 'user', content: prompt }] },
+      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 30000 });
+    const text = res.data?.content?.[0]?.text || '';
+    const m = text.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+    return null;
+  } catch(e) {
+    console.error(`[COMP-CHANGES] Failed: ${e.message}`);
+    return null;
+  }
+}
+
+// ══════════════════════════════════════════════════
 // WEB RESEARCH (Claude Sonnet with web_search)
 // ══════════════════════════════════════════════════
 async function researchBusinessOnWeb(businessName, city, state, website, socialLinks, googleData) {
@@ -405,4 +567,4 @@ async function runLightScan({ businessName, city, state }) {
   } catch (e) { console.error('[SCAN] Light CRASH:', e.message); return { error: 'Scan failed.', businessName, city, state }; }
 }
 
-module.exports = { runFullScan, runLightScan };
+module.exports = { runFullScan, runLightScan, researchCompetitorDeep, analyzeCompetitorChanges };

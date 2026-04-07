@@ -1,7 +1,8 @@
 const axios = require('axios');
 const { queryOne } = require('../db');
 const { requireAuth } = require('../middleware/auth');
-const { runFullScan, runLightScan } = require('../services/scanEngine');
+const { runFullScan, runLightScan, researchCompetitorDeep, analyzeCompetitorChanges } = require('../services/scanEngine');
+const { queryAll } = require('../db');
 
 // Simple in-memory rate limiter for teaser scans
 const rateLimitMap = new Map();
@@ -459,6 +460,233 @@ If you cannot determine a field, use empty string. Do NOT guess — only extract
       console.error('[SCAN] Pre-scan failed:', err.message);
       return reply.status(500).send({ error: 'Pre-scan failed' });
     }
+  });
+
+  // ══════════════════════════════════════════════════
+  // COMPETITOR INTELLIGENCE ENDPOINTS
+  // ══════════════════════════════════════════════════
+
+  // ── RESEARCH ALL COMPETITORS FOR AN AUDIT ──
+  fastify.post('/api/audits/:id/research-competitors', async (request, reply) => {
+    const auditId = parseInt(request.params.id);
+    console.log(`[COMP-INTEL] Research request for audit ${auditId}`);
+
+    const audit = await queryOne('SELECT id, business_name, city, competitor_list FROM audits WHERE id = $1', [auditId]);
+    if (!audit) return reply.status(404).send({ error: 'Audit not found' });
+
+    const competitors = audit.competitor_list;
+    if (!competitors || !Array.isArray(competitors) || competitors.length === 0) {
+      return reply.status(400).send({ error: 'No competitors in competitor_list. Update competitors first.' });
+    }
+
+    console.log(`[COMP-INTEL] Researching ${competitors.length} competitors for ${audit.business_name}`);
+    const profiles = [];
+
+    for (const comp of competitors) {
+      try {
+        const research = await researchCompetitorDeep(comp.name, comp.city || audit.city, comp.state || '', audit.business_name);
+        if (!research) { console.log(`[COMP-INTEL] No result for ${comp.name}`); continue; }
+
+        const row = await queryOne(
+          `INSERT INTO competitor_profiles (audit_id, competitor_name, competitor_place_id, competitor_city, google_rating, google_review_count, review_velocity, top_praise_themes, top_complaint_themes, emerging_problems, resolved_problems, services_emphasis, competitive_advantages, competitive_weaknesses, response_rate_estimate, overall_threat_level, raw_research)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+          [
+            auditId, comp.name, comp.placeId || null, comp.city || audit.city,
+            research.googleRating || null, research.googleReviewCount || null,
+            research.reviewAnalysis?.reviewVelocity || null,
+            JSON.stringify(research.reviewAnalysis?.praiseThemes || []),
+            JSON.stringify(research.reviewAnalysis?.complaintThemes || []),
+            JSON.stringify(research.reviewAnalysis?.emergingProblems || []),
+            JSON.stringify(research.reviewAnalysis?.resolvedProblems || []),
+            JSON.stringify(research.competitiveProfile?.primaryServices || []),
+            JSON.stringify(research.competitiveProfile?.uniqueAdvantages || []),
+            JSON.stringify(research.competitiveProfile?.exploitableWeaknesses || []),
+            research.reviewAnalysis?.ownerResponseRate || null,
+            research.threatAssessment?.overallThreatLevel || null,
+            JSON.stringify(research)
+          ]
+        );
+        profiles.push(row);
+        console.log(`[COMP-INTEL] Saved profile ${row.id} for ${comp.name}`);
+      } catch (e) {
+        console.error(`[COMP-INTEL] Error researching ${comp.name}:`, e.message);
+      }
+    }
+
+    await queryOne('UPDATE audits SET competitor_last_updated = NOW() WHERE id = $1', [auditId]);
+    console.log(`[COMP-INTEL] Done. ${profiles.length}/${competitors.length} profiles saved.`);
+    return reply.send({ success: true, profileCount: profiles.length, profiles });
+  });
+
+  // ── UPDATE COMPETITOR LIST ──
+  fastify.post('/api/audits/:id/update-competitors', async (request, reply) => {
+    const auditId = parseInt(request.params.id);
+    const { competitors } = request.body || {};
+
+    if (!Array.isArray(competitors) || competitors.length === 0) {
+      return reply.status(400).send({ error: 'competitors array required' });
+    }
+
+    const audit = await queryOne('SELECT id, business_name, city, competitor_list FROM audits WHERE id = $1', [auditId]);
+    if (!audit) return reply.status(404).send({ error: 'Audit not found' });
+
+    const existingList = audit.competitor_list || [];
+    const existingNames = new Set(existingList.map(c => c.name.toLowerCase()));
+    const newCompetitors = competitors.filter(c => !existingNames.has(c.name.toLowerCase()));
+    const updatedList = [...existingList, ...newCompetitors];
+
+    await queryOne('UPDATE audits SET competitor_list = $1, competitor_last_updated = NOW(), updated_at = NOW() WHERE id = $2',
+      [JSON.stringify(updatedList), auditId]);
+
+    console.log(`[COMP-UPDATE] Audit ${auditId}: ${existingList.length} existing + ${newCompetitors.length} new = ${updatedList.length} total`);
+
+    // Research new competitors
+    const newProfiles = [];
+    for (const comp of newCompetitors) {
+      try {
+        const research = await researchCompetitorDeep(comp.name, comp.city || audit.city, comp.state || '', audit.business_name);
+        if (!research) continue;
+
+        const row = await queryOne(
+          `INSERT INTO competitor_profiles (audit_id, competitor_name, competitor_place_id, competitor_city, google_rating, google_review_count, review_velocity, top_praise_themes, top_complaint_themes, emerging_problems, resolved_problems, services_emphasis, competitive_advantages, competitive_weaknesses, response_rate_estimate, overall_threat_level, raw_research)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+          [
+            auditId, comp.name, comp.placeId || null, comp.city || audit.city,
+            research.googleRating || null, research.googleReviewCount || null,
+            research.reviewAnalysis?.reviewVelocity || null,
+            JSON.stringify(research.reviewAnalysis?.praiseThemes || []),
+            JSON.stringify(research.reviewAnalysis?.complaintThemes || []),
+            JSON.stringify(research.reviewAnalysis?.emergingProblems || []),
+            JSON.stringify(research.reviewAnalysis?.resolvedProblems || []),
+            JSON.stringify(research.competitiveProfile?.primaryServices || []),
+            JSON.stringify(research.competitiveProfile?.uniqueAdvantages || []),
+            JSON.stringify(research.competitiveProfile?.exploitableWeaknesses || []),
+            research.reviewAnalysis?.ownerResponseRate || null,
+            research.threatAssessment?.overallThreatLevel || null,
+            JSON.stringify(research)
+          ]
+        );
+        newProfiles.push(row);
+      } catch (e) {
+        console.error(`[COMP-UPDATE] Error researching ${comp.name}:`, e.message);
+      }
+    }
+
+    return reply.send({ success: true, competitorList: updatedList, newResearched: newProfiles.length });
+  });
+
+  // ── GET COMPETITOR INTELLIGENCE ──
+  fastify.get('/api/audits/:id/competitor-intelligence', async (request, reply) => {
+    const auditId = parseInt(request.params.id);
+    console.log(`[COMP-INTEL] Fetching intelligence for audit ${auditId}`);
+
+    const audit = await queryOne('SELECT id, competitor_list, competitor_last_updated FROM audits WHERE id = $1', [auditId]);
+    if (!audit) return reply.status(404).send({ error: 'Audit not found' });
+
+    // Get latest snapshot per competitor using DISTINCT ON
+    const profiles = await queryAll(
+      `SELECT DISTINCT ON (competitor_name) * FROM competitor_profiles
+       WHERE audit_id = $1 ORDER BY competitor_name, snapshot_date DESC`,
+      [auditId]
+    );
+
+    const changes = await queryAll(
+      'SELECT * FROM competitor_changes WHERE audit_id = $1 ORDER BY detected_at DESC',
+      [auditId]
+    );
+
+    console.log(`[COMP-INTEL] Found ${profiles.length} profiles, ${changes.length} changes for audit ${auditId}`);
+    return reply.send({
+      competitorList: audit.competitor_list || [],
+      lastUpdated: audit.competitor_last_updated,
+      profiles,
+      changes
+    });
+  });
+
+  // ── RESCAN COMPETITORS (monthly monitoring) ──
+  fastify.post('/api/audits/:id/rescan-competitors', async (request, reply) => {
+    const auditId = parseInt(request.params.id);
+    console.log(`[COMP-RESCAN] Rescan request for audit ${auditId}`);
+
+    const audit = await queryOne('SELECT id, business_name, city, competitor_list FROM audits WHERE id = $1', [auditId]);
+    if (!audit) return reply.status(404).send({ error: 'Audit not found' });
+
+    const competitors = audit.competitor_list;
+    if (!competitors || !Array.isArray(competitors) || competitors.length === 0) {
+      return reply.status(400).send({ error: 'No competitors to rescan' });
+    }
+
+    console.log(`[COMP-RESCAN] Rescanning ${competitors.length} competitors for ${audit.business_name}`);
+    const allChanges = [];
+
+    for (const comp of competitors) {
+      try {
+        // Get previous snapshot
+        const prevSnapshot = await queryOne(
+          'SELECT * FROM competitor_profiles WHERE audit_id = $1 AND competitor_name = $2 ORDER BY snapshot_date DESC LIMIT 1',
+          [auditId, comp.name]
+        );
+
+        // Run fresh research
+        const research = await researchCompetitorDeep(comp.name, comp.city || audit.city, comp.state || '', audit.business_name);
+        if (!research) { console.log(`[COMP-RESCAN] No result for ${comp.name}`); continue; }
+
+        // Save new profile
+        const newProfile = await queryOne(
+          `INSERT INTO competitor_profiles (audit_id, competitor_name, competitor_place_id, competitor_city, google_rating, google_review_count, review_velocity, top_praise_themes, top_complaint_themes, emerging_problems, resolved_problems, services_emphasis, competitive_advantages, competitive_weaknesses, response_rate_estimate, overall_threat_level, raw_research)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+          [
+            auditId, comp.name, comp.placeId || null, comp.city || audit.city,
+            research.googleRating || null, research.googleReviewCount || null,
+            research.reviewAnalysis?.reviewVelocity || null,
+            JSON.stringify(research.reviewAnalysis?.praiseThemes || []),
+            JSON.stringify(research.reviewAnalysis?.complaintThemes || []),
+            JSON.stringify(research.reviewAnalysis?.emergingProblems || []),
+            JSON.stringify(research.reviewAnalysis?.resolvedProblems || []),
+            JSON.stringify(research.competitiveProfile?.primaryServices || []),
+            JSON.stringify(research.competitiveProfile?.uniqueAdvantages || []),
+            JSON.stringify(research.competitiveProfile?.exploitableWeaknesses || []),
+            research.reviewAnalysis?.ownerResponseRate || null,
+            research.threatAssessment?.overallThreatLevel || null,
+            JSON.stringify(research)
+          ]
+        );
+
+        // Compare to previous snapshot
+        if (prevSnapshot) {
+          const prevResearch = prevSnapshot.raw_research;
+          const changeAnalysis = await analyzeCompetitorChanges(comp.name, prevResearch, research, audit.business_name);
+
+          const ratingChange = (research.googleRating || 0) - (prevSnapshot.google_rating || 0);
+          const reviewChange = (research.googleReviewCount || 0) - (prevSnapshot.google_review_count || 0);
+
+          const changeRow = await queryOne(
+            `INSERT INTO competitor_changes (audit_id, competitor_name, previous_snapshot_id, current_snapshot_id, rating_change, review_count_change, new_complaint_themes, resolved_complaint_themes, threat_level_change, summary)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+            [
+              auditId, comp.name, prevSnapshot.id, newProfile.id,
+              ratingChange, reviewChange,
+              JSON.stringify(changeAnalysis?.newThreats || []),
+              JSON.stringify(changeAnalysis?.newOpportunities || []),
+              changeAnalysis?.momentumShift || null,
+              changeAnalysis?.headline || null
+            ]
+          );
+
+          allChanges.push({ competitor: comp.name, change: changeRow, analysis: changeAnalysis });
+          console.log(`[COMP-RESCAN] ${comp.name}: rating ${ratingChange > 0 ? '+' : ''}${ratingChange}, reviews ${reviewChange > 0 ? '+' : ''}${reviewChange}`);
+        } else {
+          console.log(`[COMP-RESCAN] ${comp.name}: first scan, no comparison available`);
+        }
+      } catch (e) {
+        console.error(`[COMP-RESCAN] Error rescanning ${comp.name}:`, e.message);
+      }
+    }
+
+    await queryOne('UPDATE audits SET competitor_last_updated = NOW() WHERE id = $1', [auditId]);
+    console.log(`[COMP-RESCAN] Done. ${allChanges.length} change records created.`);
+    return reply.send({ success: true, changeCount: allChanges.length, changes: allChanges });
   });
 }
 

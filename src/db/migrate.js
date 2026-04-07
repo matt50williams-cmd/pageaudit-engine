@@ -391,6 +391,52 @@ ALTER TABLE audits ADD COLUMN IF NOT EXISTS snapshot_captured_at TIMESTAMPTZ;
 ALTER TABLE audits ADD COLUMN IF NOT EXISTS plan TEXT DEFAULT 'basic';
 
 ALTER TABLE audits ADD COLUMN IF NOT EXISTS selected_competitors JSONB;
+
+ALTER TABLE audits ADD COLUMN IF NOT EXISTS competitor_list JSONB;
+ALTER TABLE audits ADD COLUMN IF NOT EXISTS competitor_last_updated TIMESTAMP;
+ALTER TABLE audits ADD COLUMN IF NOT EXISTS baseline_scan_id INTEGER;
+
+CREATE TABLE IF NOT EXISTS competitor_profiles (
+  id SERIAL PRIMARY KEY,
+  audit_id INTEGER REFERENCES audits(id),
+  competitor_name TEXT NOT NULL,
+  competitor_place_id TEXT,
+  competitor_city TEXT,
+  snapshot_date TIMESTAMP DEFAULT NOW(),
+  google_rating DECIMAL(3,1),
+  google_review_count INTEGER,
+  review_velocity TEXT,
+  top_praise_themes JSONB,
+  top_complaint_themes JSONB,
+  emerging_problems JSONB,
+  resolved_problems JSONB,
+  services_emphasis JSONB,
+  competitive_advantages JSONB,
+  competitive_weaknesses JSONB,
+  response_rate_estimate TEXT,
+  overall_threat_level TEXT,
+  raw_research JSONB,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS competitor_changes (
+  id SERIAL PRIMARY KEY,
+  audit_id INTEGER REFERENCES audits(id),
+  competitor_name TEXT NOT NULL,
+  previous_snapshot_id INTEGER REFERENCES competitor_profiles(id),
+  current_snapshot_id INTEGER REFERENCES competitor_profiles(id),
+  rating_change DECIMAL(3,1),
+  review_count_change INTEGER,
+  new_complaint_themes JSONB,
+  resolved_complaint_themes JSONB,
+  threat_level_change TEXT,
+  summary TEXT,
+  detected_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_competitor_profiles_audit_id ON competitor_profiles(audit_id);
+CREATE INDEX IF NOT EXISTS idx_competitor_profiles_place_id ON competitor_profiles(competitor_place_id);
+CREATE INDEX IF NOT EXISTS idx_competitor_changes_audit_id ON competitor_changes(audit_id);
 `;
 
 async function migrate() {
