@@ -71,8 +71,8 @@ async function scanRoutes(fastify) {
       return reply.status(400).send({ error: 'auditId is required for full scan' });
     }
 
-    // Verify payment
-    const audit = await queryOne('SELECT id, paid, status FROM audits WHERE id = $1', [auditId]);
+    // Verify payment + load verified URLs, snapshots, and plan
+    const audit = await queryOne('SELECT id, paid, status, plan, selected_competitors, verified_website_url, verified_facebook_url, verified_yelp_url, website_snapshot_url, facebook_snapshot_url, yelp_snapshot_url FROM audits WHERE id = $1', [auditId]);
     console.log('[FULL SCAN] Audit lookup:', audit ? `id=${audit.id} paid=${audit.paid} status=${audit.status}` : 'NOT FOUND');
     if (!audit) return reply.status(404).send({ error: 'Audit not found' });
     if (!audit.paid) { console.log('[FULL SCAN] BLOCKED — audit not paid'); return reply.status(402).send({ error: 'Payment required for full scan' }); }
@@ -83,7 +83,8 @@ async function scanRoutes(fastify) {
     await queryOne('UPDATE audits SET status = $1, updated_at = NOW() WHERE id = $2', ['analyzing', auditId]);
 
     try {
-      const result = await runFullScan({ businessName, city, state: state || '', website, facebookUrl, address, phone, industry, biggestChallenge, yearsInBusiness, googleProfileUrl, yelpUrl });
+      const selectedComps = audit.selected_competitors ? (typeof audit.selected_competitors === 'string' ? JSON.parse(audit.selected_competitors) : audit.selected_competitors) : null;
+      const result = await runFullScan({ businessName, city, state: state || '', website, facebookUrl, yelpUrl, industry, biggestChallenge, plan: audit.plan || 'basic', selectedCompetitors: selectedComps });
 
       if (result.error) {
         await queryOne('UPDATE audits SET status = $1, updated_at = NOW() WHERE id = $2', ['failed', auditId]);
@@ -128,6 +129,47 @@ async function scanRoutes(fastify) {
         [result.overallScore, 'completed', auditId]
       );
 
+      // Attach verified pages + snapshots to response
+      result.verifiedPages = {
+        website: audit.verified_website_url ? { url: audit.verified_website_url, platform: 'Website' } : null,
+        facebook: audit.verified_facebook_url ? { url: audit.verified_facebook_url, platform: 'Facebook' } : null,
+        yelp: audit.verified_yelp_url ? { url: audit.verified_yelp_url, platform: 'Yelp' } : null,
+      };
+      result.snapshots = {
+        website: audit.website_snapshot_url || null,
+        facebook: audit.facebook_snapshot_url || null,
+        yelp: audit.yelp_snapshot_url || null,
+        trustCopy: 'These are the exact pages your customers see when they find your business online.',
+      };
+
+      // Enrich findings with snapshot references
+      const platformSnapshotMap = {
+        'Website': audit.website_snapshot_url ? 'website' : null,
+        'Facebook': audit.facebook_snapshot_url ? 'facebook' : null,
+        'Yelp': audit.yelp_snapshot_url ? 'yelp' : null,
+        'Google': null, // Google has no snapshot
+        'Search': null,
+        'NAP': null,
+        'Reviews': null,
+        'Competitors': null,
+      };
+      for (const finding of result.allFindings) {
+        const snapshotKey = platformSnapshotMap[finding.platform];
+        finding.snapshotRef = snapshotKey || null;
+      }
+
+      // Presentation section for frontend
+      const hasAnySnapshot = !!(audit.website_snapshot_url || audit.facebook_snapshot_url || audit.yelp_snapshot_url);
+      result.presenceSection = hasAnySnapshot ? {
+        title: 'Your Online Presence (Verified)',
+        cards: [
+          { platform: 'Website', snapshot: audit.website_snapshot_url || null, url: audit.verified_website_url || null, status: audit.verified_website_url ? 'verified' : 'not_found' },
+          { platform: 'Facebook', snapshot: audit.facebook_snapshot_url || null, url: audit.verified_facebook_url || null, status: audit.verified_facebook_url ? 'verified' : 'not_found' },
+          { platform: 'Yelp', snapshot: audit.yelp_snapshot_url || null, url: audit.verified_yelp_url || null, status: audit.verified_yelp_url ? 'verified' : 'not_found' },
+        ],
+        trustCopy: 'These are the exact pages your customers see when they find your business online.',
+      } : null;
+
       return reply.send(result);
     } catch (err) {
       console.error('[FULL SCAN] CRASH:', err.message, err.stack);
@@ -152,6 +194,82 @@ async function scanRoutes(fastify) {
       scannedAt: scanResult?.scanned_at || null,
       complete: audit.status === 'completed',
     });
+  });
+
+  // ── COMPETITOR OPTIONS (for picker) ──
+  fastify.post('/api/scan/competitor-options', async (request, reply) => {
+    const { businessName, city, state } = request.body || {};
+    if (!businessName || !city) return reply.status(400).send({ error: 'businessName and city required' });
+
+    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+    if (!apiKey) return reply.status(500).send({ error: 'Google API not configured' });
+
+    try {
+      // Find the subject business first
+      const findRes = await axios.get('https://maps.googleapis.com/maps/api/place/findplacefromtext/json', {
+        params: { input: `${businessName} ${city} ${state || ''}`, inputtype: 'textquery', fields: 'place_id,name,types,formatted_address', key: apiKey },
+        timeout: 8000,
+      });
+      const subject = findRes.data?.candidates?.[0];
+      const subjectPlaceId = subject?.place_id || null;
+      const type = (subject?.types || [])[0] || 'establishment';
+
+      // Geocode for nearby search center
+      const geo = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+        params: { address: subject?.formatted_address || `${businessName} ${city} ${state || ''}`, key: apiKey },
+        timeout: 5000,
+      });
+      const loc = geo.data?.results?.[0]?.geometry?.location;
+      if (!loc) return reply.status(404).send({ error: 'Could not locate business area' });
+
+      // Search for nearby similar businesses
+      let results = [];
+      for (const params of [
+        { location: `${loc.lat},${loc.lng}`, radius: 10000, type, key: apiKey },
+        { location: `${loc.lat},${loc.lng}`, radius: 15000, keyword: type.replace(/_/g, ' '), key: apiKey },
+        { location: `${loc.lat},${loc.lng}`, radius: 25000, keyword: `${type.replace(/_/g, ' ')} ${city}`, key: apiKey },
+      ]) {
+        const r = await axios.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', { params, timeout: 8000 });
+        const filtered = (r.data?.results || []).filter(p => p.place_id !== subjectPlaceId);
+        if (filtered.length > results.length) results = filtered;
+        if (results.length >= 8) break;
+      }
+
+      const options = results.slice(0, 10).map(p => ({
+        placeId: p.place_id,
+        name: p.name,
+        address: p.vicinity || '',
+        rating: p.rating || null,
+        reviewCount: p.user_ratings_total || 0,
+        types: (p.types || []).slice(0, 3).map(t => t.replace(/_/g, ' ')),
+      }));
+
+      console.log(`[COMPETITOR-PICKER] Found ${options.length} options for ${businessName} in ${city}`);
+      return reply.send({ success: true, options });
+    } catch (err) {
+      console.error('[COMPETITOR-PICKER] Error:', err.message);
+      return reply.status(500).send({ error: 'Failed to find competitor options' });
+    }
+  });
+
+  // ── SELECT COMPETITORS (save picks) ──
+  fastify.post('/api/audits/:id/select-competitors', async (request, reply) => {
+    const auditId = parseInt(request.params.id);
+    const { selectedCompetitors } = request.body || {};
+
+    const audit = await queryOne('SELECT id, paid FROM audits WHERE id = $1', [auditId]);
+    if (!audit) return reply.status(404).send({ error: 'Audit not found' });
+
+    // selectedCompetitors is an array of {placeId, name, address, rating, reviewCount}
+    const comps = Array.isArray(selectedCompetitors) ? selectedCompetitors.slice(0, 3) : [];
+
+    await queryOne(
+      'UPDATE audits SET selected_competitors = $1, updated_at = NOW() WHERE id = $2',
+      [JSON.stringify(comps), auditId]
+    );
+
+    console.log(`[COMPETITOR-PICKER] Saved ${comps.length} competitors for audit ${auditId}`);
+    return reply.send({ success: true, count: comps.length });
   });
 
   // ── GET SCAN RESULT ──

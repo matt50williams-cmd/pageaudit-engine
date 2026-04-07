@@ -1020,10 +1020,11 @@ function applyTierToHeadline(headline, plan) {
 // ══════════════════════════════════════════════════
 // FULL AUDIT
 // ══════════════════════════════════════════════════
-async function runFullScan({ businessName, city, state, website, facebookUrl, yelpUrl, industry, biggestChallenge, plan }) {
+async function runFullScan({ businessName, city, state, website, facebookUrl, yelpUrl, industry, biggestChallenge, plan, selectedCompetitors }) {
   plan = ['basic', 'advanced', 'competitive'].includes(plan) ? plan : 'basic';
   console.log(`[SCAN] ═══ FULL AUDIT: ${businessName}, ${city} ═══`);
   console.log(`[SCAN] Inputs: website=${website || 'NONE'} facebookUrl=${facebookUrl || 'NONE'} yelpUrl=${yelpUrl || 'NONE'} industry=${industry || 'NONE'}`);
+  console.log(`[SCAN] Selected competitors: ${selectedCompetitors ? selectedCompetitors.length : 'none (auto-discover)'}`);
   console.log(`[SCAN] API tokens: APIFY=${process.env.APIFY_API_TOKEN ? 'SET' : 'MISSING'} ANTHROPIC=${process.env.ANTHROPIC_API_KEY ? 'SET' : 'MISSING'}`);
   const t0 = Date.now();
 
@@ -1045,7 +1046,32 @@ async function runFullScan({ businessName, city, state, website, facebookUrl, ye
   ]);
 
   const v = r => r.status === 'fulfilled' ? r.value : {};
-  const websiteData = v(webR), searchData = v(searchR), compData = v(compR), facebookData = v(fbR), yelpData = v(yelpR);
+  const websiteData = v(webR), searchData = v(searchR), facebookData = v(fbR), yelpData = v(yelpR);
+
+  // Use selected competitors if user picked them, otherwise use auto-discovered
+  let compData = v(compR);
+  if (selectedCompetitors && selectedCompetitors.length > 0) {
+    console.log(`[SCAN] Using ${selectedCompetitors.length} user-selected competitors instead of auto-discovered`);
+    const selComps = selectedCompetitors.map(c => ({
+      name: c.name, rating: c.rating || null, reviewCount: c.reviewCount || 0,
+      address: c.address || '', placeId: c.placeId || null, types: c.types || [], estimated: false,
+    }));
+    // Merge: keep auto-discovered ranking/findings but replace competitor list
+    compData = {
+      ...compData,
+      competitors: selComps,
+      totalInArea: (compData.totalInArea || 0) || selComps.length + 1,
+      estimated: false,
+      source: 'user_selected',
+    };
+    // Recalculate ranking against selected competitors
+    if (google.rating) {
+      const all = [{ name: businessName, rating: google.rating, reviewCount: google.reviewCount || 0 }, ...selComps.filter(c => c.rating)];
+      all.sort((a, b) => (b.rating * 10 + Math.log((b.reviewCount || 0) + 1)) - (a.rating * 10 + Math.log((a.reviewCount || 0) + 1)));
+      compData.ranking = all.findIndex(b => b.name === businessName) + 1;
+      compData.totalInArea = all.length;
+    }
+  }
 
   // Sequential (need prior data)
   const napData = await checkNAP(google, websiteData).catch(() => ({ rawScore: 0, maxScore: 10, excluded: true, findings: [], dataPoints: 0 }));

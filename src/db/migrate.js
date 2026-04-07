@@ -377,6 +377,20 @@ CREATE INDEX IF NOT EXISTS idx_reps_email ON reps(email);
 CREATE INDEX IF NOT EXISTS idx_rep_commissions_rep_id ON rep_commissions(rep_id);
 CREATE INDEX IF NOT EXISTS idx_rep_commissions_status ON rep_commissions(status);
 CREATE INDEX IF NOT EXISTS idx_rep_alerts_rep_id ON rep_alerts(rep_id);
+
+ALTER TABLE audits ADD COLUMN IF NOT EXISTS verified_website_url TEXT;
+ALTER TABLE audits ADD COLUMN IF NOT EXISTS verified_facebook_url TEXT;
+ALTER TABLE audits ADD COLUMN IF NOT EXISTS verified_yelp_url TEXT;
+ALTER TABLE audits ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+
+ALTER TABLE audits ADD COLUMN IF NOT EXISTS website_snapshot_url TEXT;
+ALTER TABLE audits ADD COLUMN IF NOT EXISTS facebook_snapshot_url TEXT;
+ALTER TABLE audits ADD COLUMN IF NOT EXISTS yelp_snapshot_url TEXT;
+ALTER TABLE audits ADD COLUMN IF NOT EXISTS snapshot_captured_at TIMESTAMPTZ;
+
+ALTER TABLE audits ADD COLUMN IF NOT EXISTS plan TEXT DEFAULT 'basic';
+
+ALTER TABLE audits ADD COLUMN IF NOT EXISTS selected_competitors JSONB;
 `;
 
 async function migrate() {
