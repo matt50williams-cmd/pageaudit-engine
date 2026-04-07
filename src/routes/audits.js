@@ -2,6 +2,8 @@ const { queryOne, queryAll } = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { runAnalyzer } = require("../services/analyzer");
 const { runWriter } = require("../services/reportWriter");
+const { discoverPages } = require("../services/pageDiscovery");
+const { captureSnapshots, saveSnapshotsToAudit } = require("../services/snapshots");
 
 async function auditRoutes(fastify) {
   fastify.post("/api/audits", async (request, reply) => {
@@ -215,6 +217,21 @@ async function auditRoutes(fastify) {
         return reply.status(404).send({ error: "Audit not found" });
       }
 
+      // Structured snapshots + verified pages for frontend
+      audit.verifiedPages = {
+        website: audit.verified_website_url ? { url: audit.verified_website_url, platform: 'Website' } : null,
+        facebook: audit.verified_facebook_url ? { url: audit.verified_facebook_url, platform: 'Facebook' } : null,
+        yelp: audit.verified_yelp_url ? { url: audit.verified_yelp_url, platform: 'Yelp' } : null,
+        verifiedAt: audit.verified_at || null,
+      };
+      audit.snapshots = {
+        website: audit.website_snapshot_url || null,
+        facebook: audit.facebook_snapshot_url || null,
+        yelp: audit.yelp_snapshot_url || null,
+        capturedAt: audit.snapshot_captured_at || null,
+        trustCopy: 'These are the exact pages your customers see when they find your business online.',
+      };
+
       return reply.send(audit);
     } catch (err) {
       request.log.error(err, "Get audit error");
@@ -306,6 +323,123 @@ async function auditRoutes(fastify) {
     } catch (err) {
       request.log.error(err, "Delete audit error");
       return reply.status(500).send({ error: "Failed to delete audit" });
+    }
+  });
+
+  // ── PAGE DISCOVERY ──
+  fastify.post("/api/audits/:id/discover-pages", async (request, reply) => {
+    try {
+      const auditId = parseInt(request.params.id);
+      const audit = await queryOne("SELECT id, paid, business_name, city, website FROM audits WHERE id = $1", [auditId]);
+      if (!audit) return reply.status(404).send({ error: "Audit not found" });
+      if (!audit.paid) return reply.status(402).send({ error: "Payment required" });
+
+      const { businessName, city, state, website } = request.body || {};
+      const name = businessName || audit.business_name;
+      const c = city || audit.city;
+
+      if (!name || !c) return reply.status(400).send({ error: "businessName and city are required" });
+
+      const candidates = await discoverPages({
+        businessName: name,
+        city: c,
+        state: state || '',
+        website: website || audit.website || null,
+      });
+
+      return reply.send({ success: true, candidates });
+    } catch (err) {
+      request.log.error(err, "Discover pages error");
+      return reply.status(500).send({ error: "Page discovery failed" });
+    }
+  });
+
+  // ── VERIFY PAGE ──
+  fastify.post("/api/audits/:id/verify-page", async (request, reply) => {
+    try {
+      const auditId = parseInt(request.params.id);
+      const { platform, url } = request.body || {};
+
+      if (!platform || !url) return reply.status(400).send({ error: "platform and url are required" });
+
+      const validPlatforms = { website: 'verified_website_url', facebook: 'verified_facebook_url', yelp: 'verified_yelp_url' };
+      const column = validPlatforms[platform];
+      if (!column) return reply.status(400).send({ error: "platform must be website, facebook, or yelp" });
+
+      const audit = await queryOne("SELECT id, paid FROM audits WHERE id = $1", [auditId]);
+      if (!audit) return reply.status(404).send({ error: "Audit not found" });
+      if (!audit.paid) return reply.status(402).send({ error: "Payment required" });
+
+      await queryOne(
+        `UPDATE audits SET ${column} = $1, verified_at = NOW(), updated_at = NOW() WHERE id = $2`,
+        [url.trim(), auditId]
+      );
+
+      console.log(`[VERIFY] Audit ${auditId}: ${platform} verified as ${url}`);
+      return reply.send({ success: true, platform, url: url.trim() });
+    } catch (err) {
+      request.log.error(err, "Verify page error");
+      return reply.status(500).send({ error: "Verification failed" });
+    }
+  });
+
+  // ── OVERRIDE PAGE ──
+  fastify.post("/api/audits/:id/override-page", async (request, reply) => {
+    try {
+      const auditId = parseInt(request.params.id);
+      const { platform, url } = request.body || {};
+
+      if (!platform || !url) return reply.status(400).send({ error: "platform and url are required" });
+
+      const validPlatforms = { website: 'verified_website_url', facebook: 'verified_facebook_url', yelp: 'verified_yelp_url' };
+      const column = validPlatforms[platform];
+      if (!column) return reply.status(400).send({ error: "platform must be website, facebook, or yelp" });
+
+      const audit = await queryOne("SELECT id, paid FROM audits WHERE id = $1", [auditId]);
+      if (!audit) return reply.status(404).send({ error: "Audit not found" });
+      if (!audit.paid) return reply.status(402).send({ error: "Payment required" });
+
+      await queryOne(
+        `UPDATE audits SET ${column} = $1, verified_at = NOW(), updated_at = NOW() WHERE id = $2`,
+        [url.trim(), auditId]
+      );
+
+      console.log(`[VERIFY] Audit ${auditId}: ${platform} manually overridden to ${url}`);
+      return reply.send({ success: true, platform, url: url.trim() });
+    } catch (err) {
+      request.log.error(err, "Override page error");
+      return reply.status(500).send({ error: "Override failed" });
+    }
+  });
+
+  // ── CAPTURE SNAPSHOTS ──
+  fastify.post("/api/audits/:id/capture-snapshots", async (request, reply) => {
+    try {
+      const auditId = parseInt(request.params.id);
+      const audit = await queryOne(
+        "SELECT id, paid, verified_website_url, verified_facebook_url, verified_yelp_url FROM audits WHERE id = $1",
+        [auditId]
+      );
+      if (!audit) return reply.status(404).send({ error: "Audit not found" });
+      if (!audit.paid) return reply.status(402).send({ error: "Payment required" });
+
+      if (!audit.verified_website_url && !audit.verified_facebook_url && !audit.verified_yelp_url) {
+        return reply.status(400).send({ error: "No verified pages to capture. Verify at least one page first." });
+      }
+
+      console.log(`[SNAPSHOTS] Capturing for audit ${auditId}`);
+      const snapshots = await captureSnapshots({
+        websiteUrl: audit.verified_website_url || null,
+        facebookUrl: audit.verified_facebook_url || null,
+        yelpUrl: audit.verified_yelp_url || null,
+      });
+
+      await saveSnapshotsToAudit(auditId, snapshots);
+
+      return reply.send({ success: true, snapshots });
+    } catch (err) {
+      request.log.error(err, "Capture snapshots error");
+      return reply.status(500).send({ error: "Snapshot capture failed" });
     }
   });
 }

@@ -13,10 +13,10 @@ function getFrontendUrl() {
 }
 
 const AUDIT_TIERS = {
-  online: { amount: 3999, name: "Online Presence Audit — Full Report", consultantEarns: 0, youKeep: 3999 },
-  basic: { amount: 9900, name: "Online Presence Audit — Basic", consultantEarns: 4900, youKeep: 5000 },
-  standard: { amount: 12900, name: "Online Presence Audit — Standard", consultantEarns: 6400, youKeep: 6500 },
-  premium: { amount: 14900, name: "Online Presence Audit — Premium", consultantEarns: 7400, youKeep: 7500 },
+  online: { amount: 3999, name: "Online Presence Audit — Full Report", consultantEarns: 0, youKeep: 3999, plan: 'basic' },
+  basic: { amount: 9900, name: "Online Presence Audit — Basic", consultantEarns: 4900, youKeep: 5000, plan: 'basic' },
+  standard: { amount: 12900, name: "Online Presence Audit — Advanced", consultantEarns: 6400, youKeep: 6500, plan: 'advanced' },
+  premium: { amount: 14900, name: "Online Presence Audit — Competitive", consultantEarns: 7400, youKeep: 7500, plan: 'competitive' },
 };
 
 async function stripeRoutes(fastify) {
@@ -198,11 +198,13 @@ async function stripeRoutes(fastify) {
         const repCode = session.metadata?.rep_code || null;
 
         if ((product === "one_time_audit" || product === "seo_audit") && auditId) {
+          const tier = session.metadata?.tier || 'online';
+          const auditPlan = AUDIT_TIERS[tier]?.plan || 'basic';
           await queryOne(
-            `UPDATE audits SET paid = TRUE, amount_paid = $1, rep_code = $2, updated_at = NOW() WHERE id = $3`,
-            [amountPaid, repCode || null, auditId]
+            `UPDATE audits SET paid = TRUE, amount_paid = $1, rep_code = $2, plan = $3, updated_at = NOW() WHERE id = $4`,
+            [amountPaid, repCode || null, auditPlan, auditId]
           );
-          console.log(`[WEBHOOK] Audit ${auditId} marked paid = TRUE, amount = $${amountPaid}`);
+          console.log(`[WEBHOOK] Audit ${auditId} marked paid = TRUE, amount = $${amountPaid}, plan = ${auditPlan}`);
 
           await queryOne(
             `INSERT INTO funnel_events (event_type, email, report_id, metadata) VALUES ($1, $2, $3, $4)`,
