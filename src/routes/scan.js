@@ -72,7 +72,14 @@ async function scanRoutes(fastify) {
     }
 
     // Verify payment + load verified URLs, snapshots, and plan
-    const audit = await queryOne('SELECT id, paid, status, plan, selected_competitors, verified_website_url, verified_facebook_url, verified_yelp_url, website_snapshot_url, facebook_snapshot_url, yelp_snapshot_url FROM audits WHERE id = $1', [auditId]);
+    let audit;
+    try {
+      audit = await queryOne('SELECT id, paid, status, plan, selected_competitors, verified_website_url, verified_facebook_url, verified_yelp_url, website_snapshot_url, facebook_snapshot_url, yelp_snapshot_url FROM audits WHERE id = $1', [auditId]);
+    } catch (colErr) {
+      // Fallback if new columns don't exist yet (migration not run)
+      console.log('[FULL SCAN] Column query failed, using safe fallback:', colErr.message);
+      audit = await queryOne('SELECT id, paid, status FROM audits WHERE id = $1', [auditId]);
+    }
     console.log('[FULL SCAN] Audit lookup:', audit ? `id=${audit.id} paid=${audit.paid} status=${audit.status}` : 'NOT FOUND');
     if (!audit) return reply.status(404).send({ error: 'Audit not found' });
     if (!audit.paid) { console.log('[FULL SCAN] BLOCKED — audit not paid'); return reply.status(402).send({ error: 'Payment required for full scan' }); }
@@ -212,7 +219,12 @@ async function scanRoutes(fastify) {
       });
       const subject = findRes.data?.candidates?.[0];
       const subjectPlaceId = subject?.place_id || null;
-      const type = (subject?.types || [])[0] || 'establishment';
+      const rawTypes = subject?.types || [];
+      // Build keyword from Google types — replace underscores, skip generic types
+      const skipTypes = ['point_of_interest', 'establishment', 'premise', 'street_address', 'political', 'locality'];
+      const usefulTypes = rawTypes.filter(t => !skipTypes.includes(t));
+      const keyword = usefulTypes.length > 0 ? usefulTypes[0].replace(/_/g, ' ') : businessName.split(/\s+/).slice(0, 2).join(' ');
+      console.log(`[COMPETITOR-PICKER] Subject: ${subject?.name || businessName} | Google types: ${rawTypes.join(', ')} | Search keyword: "${keyword}"`);
 
       // Geocode for nearby search center
       const geo = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
@@ -222,15 +234,18 @@ async function scanRoutes(fastify) {
       const loc = geo.data?.results?.[0]?.geometry?.location;
       if (!loc) return reply.status(404).send({ error: 'Could not locate business area' });
 
-      // Search for nearby similar businesses
+      // Search using keyword only (type param fails for specialized categories like hvac_contractor)
       let results = [];
-      for (const params of [
-        { location: `${loc.lat},${loc.lng}`, radius: 10000, type, key: apiKey },
-        { location: `${loc.lat},${loc.lng}`, radius: 15000, keyword: type.replace(/_/g, ' '), key: apiKey },
-        { location: `${loc.lat},${loc.lng}`, radius: 25000, keyword: `${type.replace(/_/g, ' ')} ${city}`, key: apiKey },
-      ]) {
+      const searches = [
+        { location: `${loc.lat},${loc.lng}`, radius: 15000, keyword, key: apiKey },
+        { location: `${loc.lat},${loc.lng}`, radius: 30000, keyword, key: apiKey },
+        { location: `${loc.lat},${loc.lng}`, radius: 30000, keyword: `${keyword} ${city}`, key: apiKey },
+      ];
+      for (const params of searches) {
+        console.log(`[COMPETITOR-PICKER] Searching: keyword="${params.keyword}" radius=${params.radius}`);
         const r = await axios.get('https://maps.googleapis.com/maps/api/place/nearbysearch/json', { params, timeout: 8000 });
         const filtered = (r.data?.results || []).filter(p => p.place_id !== subjectPlaceId);
+        console.log(`[COMPETITOR-PICKER] Got ${filtered.length} results`);
         if (filtered.length > results.length) results = filtered;
         if (results.length >= 8) break;
       }
@@ -244,7 +259,7 @@ async function scanRoutes(fastify) {
         types: (p.types || []).slice(0, 3).map(t => t.replace(/_/g, ' ')),
       }));
 
-      console.log(`[COMPETITOR-PICKER] Found ${options.length} options for ${businessName} in ${city}`);
+      console.log(`[COMPETITOR-PICKER] Final: ${options.length} options for ${businessName} in ${city}`);
       return reply.send({ success: true, options });
     } catch (err) {
       console.error('[COMPETITOR-PICKER] Error:', err.message);
@@ -263,10 +278,15 @@ async function scanRoutes(fastify) {
     // selectedCompetitors is an array of {placeId, name, address, rating, reviewCount}
     const comps = Array.isArray(selectedCompetitors) ? selectedCompetitors.slice(0, 3) : [];
 
-    await queryOne(
-      'UPDATE audits SET selected_competitors = $1, updated_at = NOW() WHERE id = $2',
-      [JSON.stringify(comps), auditId]
-    );
+    try {
+      await queryOne(
+        'UPDATE audits SET selected_competitors = $1, updated_at = NOW() WHERE id = $2',
+        [JSON.stringify(comps), auditId]
+      );
+    } catch (colErr) {
+      console.log('[COMPETITOR-PICKER] selected_competitors column may not exist yet:', colErr.message);
+      // Still continue — competitors will be auto-discovered during scan
+    }
 
     console.log(`[COMPETITOR-PICKER] Saved ${comps.length} competitors for audit ${auditId}`);
     return reply.send({ success: true, count: comps.length });
