@@ -247,6 +247,8 @@ async function checkCompetitors(businessName, city, state, googleData) {
       rating: p.rating || null,
       reviewCount: p.user_ratings_total || 0,
       address: p.vicinity || '',
+      placeId: p.place_id || null,
+      types: p.types || [],
       estimated: !p.rating,
     }));
 
@@ -587,60 +589,126 @@ function getScoreLabel(s) {
 }
 
 // ══════════════════════════════════════════════════
+// COMPETITOR ENRICHMENT (fetch extra data per competitor)
+// ══════════════════════════════════════════════════
+async function enrichCompetitorData(competitors, city, state) {
+  if (!competitors || competitors.length === 0) return [];
+  const key = process.env.GOOGLE_PLACES_API_KEY;
+  const top3 = competitors.slice(0, 3);
+
+  const enriched = await Promise.all(top3.map(async (comp) => {
+    let website = null, description = null, photoCount = 0;
+
+    // Fetch Place Details if we have a placeId and API key
+    if (comp.placeId && key) {
+      try {
+        const r = await ax.get('https://maps.googleapis.com/maps/api/place/details/json', {
+          params: { place_id: comp.placeId, fields: 'website,editorial_summary,photos', key },
+          timeout: 5000,
+        });
+        const d = r.data?.result || {};
+        website = d.website || null;
+        description = d.editorial_summary?.overview || null;
+        photoCount = d.photos?.length || 0;
+      } catch {}
+    }
+
+    // Try to fetch competitor website text
+    let websiteText = '';
+    if (website) {
+      try {
+        const r = await ax.get(website, { timeout: 5000 });
+        websiteText = (r.data || '')
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .substring(0, 1500);
+      } catch {}
+    }
+
+    return {
+      name: comp.name,
+      rating: comp.rating,
+      reviewCount: comp.reviewCount,
+      address: comp.address || '',
+      categories: (comp.types || []).map(t => t.replace(/_/g, ' ')).join(', '),
+      description,
+      websiteText,
+      hasWebsite: !!website,
+      photoCount,
+    };
+  }));
+
+  console.log(`[COMPETITORS] Enriched ${enriched.length} competitors. Websites found: ${enriched.filter(c => c.hasWebsite).length}`);
+  return enriched;
+}
+
+// ══════════════════════════════════════════════════
 // COMPETITOR ANALYSIS (Claude Haiku)
 // ══════════════════════════════════════════════════
-async function generateCompetitorAnalysis(businessName, city, platforms, compData) {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
+async function generateCompetitorAnalysis(businessName, city, state, platforms, compData, bizIntel) {
+  if (!process.env.ANTHROPIC_API_KEY) return { comparisonSummary: '', keyGaps: [], whereCompetitive: [], opportunitiesToWin: [] };
   const comps = compData?.competitors || [];
-  if (comps.length === 0) return null;
+  if (comps.length === 0) return { comparisonSummary: 'No competitor data available for this area.', keyGaps: [], whereCompetitive: [], opportunitiesToWin: [] };
 
-  const top3 = comps.slice(0, 3);
-  const g = platforms.google || {};
-  const fb = platforms.facebook || {};
-  const web = platforms.website || {};
+  try {
+    const enriched = await enrichCompetitorData(comps, city, state);
 
-  const prompt = `You are analyzing a local business compared to its nearby competitors.
+    const compDetails = enriched.map((c, i) => {
+      let detail = `${i + 1}. ${c.name}
+   - Rating: ${c.rating || 'unrated'} stars (${c.reviewCount} reviews)
+   - Categories: ${c.categories || 'unknown'}
+   - Has Website: ${c.hasWebsite ? 'Yes' : 'No'}
+   - Photos on Google: ${c.photoCount}`;
+      if (c.description) detail += `\n   - Google Description: ${c.description}`;
+      if (c.websiteText) detail += `\n   - Website Content Snippet: ${c.websiteText.substring(0, 400)}`;
+      return detail;
+    }).join('\n\n');
 
-BUSINESS: ${businessName} in ${city}
-- Google rating: ${g.rating || 'N/A'} (${g.reviewCount || 0} reviews)
-- Response rate: ~${g.responseRate || 0}%
-- Website: ${web.found ? 'Yes' : 'No'}${web.perfScore ? ` (speed ${web.perfScore}/100)` : ''}
-- Facebook: ${fb.found ? `Yes (${fb.followers || 0} followers, ${fb.postCount || 0} recent posts)` : 'Not found'}
+    const bizContext = bizIntel ? `
+PRIMARY SERVICE: ${bizIntel.primaryService}
+OTHER SERVICES: ${bizIntel.secondaryServices?.join(', ') || 'none found'}
+TARGET CUSTOMER: ${bizIntel.targetCustomer}
+UNIQUE VALUE PROP: ${bizIntel.uniqueValueProp || 'not stated'}
+CERTIFICATIONS: ${bizIntel.certifications?.join(', ') || 'none listed'}
+EMERGENCY SERVICE: ${bizIntel.emergencyService ? 'Yes' : 'No'}` : '';
 
-COMPETITORS:
-${top3.map((c, i) => `${i + 1}. ${c.name} — ${c.rating} stars, ${c.reviewCount} reviews`).join('\n')}
+    const prompt = `You are a competitive intelligence analyst writing a section of a premium local business audit report.
 
-Your job:
-1. Compare the business against competitors
-2. Identify where the business is behind, competitive, or ahead
-3. Explain WHY competitors may be winning customers
-4. Do NOT just list numbers — translate into real-world impact
+SUBJECT BUSINESS: ${businessName}, ${city} ${state || ''}
+THEIR GOOGLE: ${platforms.google?.rating || 'N/A'} stars, ${platforms.google?.reviewCount || 0} reviews
+THEIR WEBSITE SPEED: ${platforms.website?.perfScore || 'N/A'}/100
+${bizContext}
 
-Rules:
-- Be clear and direct
-- Focus on trust, visibility, and customer decisions
-- Do not insult the business
-- Do not be generic — reference actual names and numbers
+THEIR LOCAL COMPETITORS:
+${compDetails}
+
+Write a competitive analysis that:
+1. Names specific competitors and what they do BETTER
+2. Identifies where the subject business has an advantage
+3. Gives concrete actions to close specific gaps
+4. References actual numbers and competitor names throughout
 
 Return ONLY valid JSON:
 {
-  "comparisonSummary": "1-2 paragraphs explaining the overall competitive position. Reference specific competitor names and numbers. Explain what a customer choosing between these businesses would see.",
-  "keyGaps": ["specific gap with competitor name and real-world impact", "another gap"],
-  "whereCompetitive": ["specific strength relative to competitors"],
-  "opportunitiesToWin": ["specific improvement that would close a gap — reference which competitor it targets"]
+  "comparisonSummary": "2-3 paragraphs. Name competitors directly. Reference specific numbers. Explain what customers see when they compare options. Be honest about where this business is behind.",
+  "keyGaps": ["Gap description that names the specific competitor doing it better and the real-world customer impact"],
+  "whereCompetitive": ["Specific strength vs a named competitor with numbers"],
+  "opportunitiesToWin": ["Specific action targeting a specific competitor weakness — concrete and actionable"]
 }`;
 
-  console.log('[COMPETITORS] Calling Claude for competitor analysis...');
-  try {
+    console.log('[COMPETITORS] Calling Claude for enriched competitor analysis...');
     const res = await axios.post('https://api.anthropic.com/v1/messages',
-      { model: 'claude-haiku-4-5-20251001', max_tokens: 1200, messages: [{ role: 'user', content: prompt }] },
-      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 15000 }
+      { model: 'claude-haiku-4-5-20251001', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] },
+      { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 20000 }
     );
     const text = res.data?.content?.[0]?.text || '';
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
-      console.log('[COMPETITORS] Analysis OK');
+      console.log('[COMPETITORS] Enriched analysis OK');
       return {
         comparisonSummary: parsed.comparisonSummary || '',
         keyGaps: parsed.keyGaps || [],
@@ -649,10 +717,10 @@ Return ONLY valid JSON:
       };
     }
     console.log('[COMPETITORS] No JSON in response');
-    return null;
+    return { comparisonSummary: '', keyGaps: [], whereCompetitive: [], opportunitiesToWin: [] };
   } catch (e) {
     console.error('[COMPETITORS] Failed:', e.message);
-    return null;
+    return { comparisonSummary: '', keyGaps: [], whereCompetitive: [], opportunitiesToWin: [] };
   }
 }
 
@@ -987,10 +1055,9 @@ async function runFullScan({ businessName, city, state, website, facebookUrl, ye
   const overallScore = calculateScore(platforms);
   const scoreLabel = getScoreLabel(overallScore);
 
-  const [insights, competitorAnalysis] = await Promise.all([
-    generateInsights(businessName, city, state, platforms, overallScore, { industry, biggestChallenge, competitors: compData }),
-    generateCompetitorAnalysis(businessName, city, platforms, compData),
-  ]);
+  // Run insights first to extract businessIntelligence, then use it for competitor analysis
+  const insights = await generateInsights(businessName, city, state, platforms, overallScore, { industry, biggestChallenge, competitors: compData });
+  const competitorAnalysis = await generateCompetitorAnalysis(businessName, city, state, platforms, compData, insights.businessIntelligence);
 
   const sev = { critical: 0, warning: 1, good: 2 };
   // Only include findings from platforms that actually returned data (not excluded)
