@@ -35,7 +35,7 @@ async function scanRoutes(fastify) {
     if (!process.env.ANTHROPIC_API_KEY) return reply.send({ error: 'No API key' });
     try {
       const res = await axios.post('https://api.anthropic.com/v1/messages', {
-        model: 'claude-sonnet-4-5-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 500,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: [{ role: 'user', content: 'Search for "Allred Heating Cooling Auburn WA" and tell me their Google rating. Return just the rating number.' }]
@@ -45,7 +45,7 @@ async function scanRoutes(fastify) {
       });
       return reply.send({
         success: true,
-        model: 'claude-sonnet-4-5-20250514',
+        model: 'claude-sonnet-4-5',
         contentBlocks: res.data?.content?.length,
         hasText: res.data?.content?.some(b => b.type === 'text'),
         stopReason: res.data?.stop_reason,

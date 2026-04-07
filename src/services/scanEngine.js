@@ -332,10 +332,10 @@ async function researchBusinessOnWeb(businessName, city, state, website, socialL
   const businessType = primaryType ? primaryType.replace(/_/g, ' ') : 'local business';
 
   try {
-    console.log(`[WEB RESEARCH] Using model: claude-sonnet-4-5-20250514, API key: ${process.env.ANTHROPIC_API_KEY ? 'SET (' + process.env.ANTHROPIC_API_KEY.slice(0, 8) + '...)' : 'MISSING'}`);
+    console.log(`[WEB RESEARCH] Using model: claude-sonnet-4-5, API key: ${process.env.ANTHROPIC_API_KEY ? 'SET (' + process.env.ANTHROPIC_API_KEY.slice(0, 8) + '...)' : 'MISSING'}`);
     console.log(`[WEB RESEARCH] Deep research starting for ${businessName} (${businessType})...`);
     const res = await axios.post('https://api.anthropic.com/v1/messages', {
-      model: 'claude-sonnet-4-5-20250514',
+      model: 'claude-sonnet-4-5',
       max_tokens: 4000,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: [{
@@ -502,7 +502,7 @@ Return ONLY JSON:
 
     console.log(`[COMPETITORS] Generating analysis (Sonnet, ${hasDeepData ? 'deep data' : 'Google data'})...`);
     const res = await axios.post('https://api.anthropic.com/v1/messages',
-      { model: 'claude-sonnet-4-5-20250514', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] },
+      { model: 'claude-sonnet-4-5', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] },
       { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 30000 });
     const text = res.data?.content?.[0]?.text || '';
     const m = text.match(/\{[\s\S]*\}/);
@@ -609,7 +609,7 @@ Return ONLY a JSON object:
   try {
     console.log('[INSIGHTS] Generating with full research context (Sonnet)...');
     const res = await axios.post('https://api.anthropic.com/v1/messages',
-      { model: 'claude-sonnet-4-5-20250514', max_tokens: 3000, messages: [{ role: 'user', content: prompt }] },
+      { model: 'claude-sonnet-4-5', max_tokens: 3000, messages: [{ role: 'user', content: prompt }] },
       { headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, timeout: 45000 });
     const text = res.data?.content?.[0]?.text || '';
     const m = text.match(/\{[\s\S]*\}/);
