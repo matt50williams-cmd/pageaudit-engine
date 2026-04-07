@@ -285,8 +285,17 @@ async function checkCompetitors(businessName, city, state, googleData) {
   if (!key) return { competitors: [], ranking: null, dataPoints: 0, estimated: true, source: 'no_api_key' };
 
   try {
-    const GENERIC = ['establishment', 'point_of_interest', 'local_business', 'store', 'premise'];
-    const primaryType = (googleData?.types || []).find(t => !GENERIC.includes(t));
+    const HVAC_CHECK = ['hvac_contractor', 'heating_contractor', 'air_conditioning_contractor'];
+    const SKIP_COMP = ['establishment', 'point_of_interest', 'local_business', 'store', 'premise', 'electrician', 'general_contractor'];
+    const compTypes = googleData?.types || [];
+    let primaryType = compTypes.find(t => HVAC_CHECK.includes(t));
+    if (!primaryType) {
+      const nl = businessName.toLowerCase();
+      if (nl.includes('heating') || nl.includes('cooling') || nl.includes('hvac') || nl.includes('air condition')) primaryType = 'hvac_contractor';
+      else if (nl.includes('plumb')) primaryType = 'plumber';
+      else if (nl.includes('roof')) primaryType = 'roofing_contractor';
+    }
+    if (!primaryType) primaryType = compTypes.find(t => !SKIP_COMP.includes(t));
     const TYPE_TO_QUERY = {
       'hvac_contractor': 'heating cooling HVAC', 'heating_contractor': 'heating cooling HVAC',
       'air_conditioning_contractor': 'heating cooling HVAC', 'electrician': 'electrician electrical contractor',
@@ -342,10 +351,28 @@ async function checkCompetitors(businessName, city, state, googleData) {
 async function researchBusinessOnWeb(businessName, city, state, website, socialLinks, googleData) {
   if (!process.env.ANTHROPIC_API_KEY) return null;
 
-  const PRIORITY_TYPES = ['hvac_contractor', 'heating_contractor', 'air_conditioning_contractor'];
-  const GENERIC = ['establishment', 'point_of_interest', 'local_business', 'electrician', 'general_contractor'];
+  const HVAC_TYPES = ['hvac_contractor', 'heating_contractor', 'air_conditioning_contractor'];
+  const SKIP = ['establishment', 'point_of_interest', 'local_business', 'electrician', 'general_contractor', 'store', 'premise'];
   const types = googleData?.types || [];
-  let primaryType = types.find(t => PRIORITY_TYPES.includes(t)) || types.find(t => !GENERIC.includes(t)) || types.find(t => !['establishment', 'point_of_interest', 'local_business'].includes(t));
+
+  // Check HVAC types first
+  let primaryType = types.find(t => HVAC_TYPES.includes(t));
+
+  // If no HVAC type, check business name for hints
+  if (!primaryType) {
+    const nameLower = businessName.toLowerCase();
+    if (nameLower.includes('heating') || nameLower.includes('cooling') || nameLower.includes('hvac') || nameLower.includes('air condition')) {
+      primaryType = 'hvac_contractor';
+    } else if (nameLower.includes('plumb')) {
+      primaryType = 'plumber';
+    } else if (nameLower.includes('roof')) {
+      primaryType = 'roofing_contractor';
+    }
+  }
+
+  // Fall back to first non-skipped type
+  if (!primaryType) primaryType = types.find(t => !SKIP.includes(t));
+
   const businessType = primaryType ? primaryType.replace(/_/g, ' ') : 'local business';
 
   try {

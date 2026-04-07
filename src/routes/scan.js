@@ -321,8 +321,28 @@ If you cannot determine a field, use empty string. Do NOT guess — only extract
         'veterinary_care': 'veterinarian vet',
       };
       const HVAC_TYPES = ['hvac_contractor', 'heating_contractor', 'air_conditioning_contractor'];
-      const DEPRIORITIZE = ['electrician', 'general_contractor'];
-      const primaryUsefulType = usefulTypes.find(t => HVAC_TYPES.includes(t)) || usefulTypes.find(t => !DEPRIORITIZE.includes(t)) || usefulTypes[0] || null;
+      const SKIP_TYPES = ['electrician', 'general_contractor', 'store', 'premise'];
+
+      // Check HVAC types from Google first
+      let primaryUsefulType = usefulTypes.find(t => HVAC_TYPES.includes(t));
+
+      // If no HVAC type found, check business name for hints
+      if (!primaryUsefulType) {
+        const nameLower = businessName.toLowerCase();
+        if (nameLower.includes('heating') || nameLower.includes('cooling') || nameLower.includes('hvac') || nameLower.includes('air condition')) {
+          primaryUsefulType = 'hvac_contractor';
+        } else if (nameLower.includes('plumb')) {
+          primaryUsefulType = 'plumber';
+        } else if (nameLower.includes('roof')) {
+          primaryUsefulType = 'roofing_contractor';
+        } else if (nameLower.includes('electric') && !nameLower.includes('heating') && !nameLower.includes('cooling')) {
+          primaryUsefulType = 'electrician';
+        }
+      }
+
+      // Fall back to first non-skipped Google type
+      if (!primaryUsefulType) primaryUsefulType = usefulTypes.find(t => !SKIP_TYPES.includes(t)) || usefulTypes[0] || null;
+
       const businessType = TYPE_TO_QUERY[primaryUsefulType] || (primaryUsefulType ? primaryUsefulType.replace(/_/g, ' ') : businessName.split(/\s+/).slice(0, 2).join(' '));
       console.log(`[COMPETITOR-PICKER] Subject: ${subject?.name || businessName} | Types: ${rawTypes.join(', ')} | Search keyword: "${businessType}"`);
 
