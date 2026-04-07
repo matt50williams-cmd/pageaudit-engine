@@ -307,14 +307,26 @@ If you cannot determine a field, use empty string. Do NOT guess — only extract
       // Step 2: Extract the most specific business type for the search query
       const skipTypes = ['point_of_interest', 'establishment', 'premise', 'street_address', 'political', 'locality', 'sublocality', 'neighborhood', 'route', 'geocode'];
       const usefulTypes = rawTypes.filter(t => !skipTypes.includes(t));
-      const businessType = usefulTypes.length > 0 ? usefulTypes[0].replace(/_/g, ' ') : businessName.split(/\s+/).slice(0, 2).join(' ');
-      console.log(`[COMPETITOR-PICKER] Subject: ${subject?.name || businessName} | Types: ${rawTypes.join(', ')} | Business type: "${businessType}"`);
+      const TYPE_TO_QUERY = {
+        'hvac_contractor': 'heating cooling HVAC', 'heating_contractor': 'heating cooling HVAC',
+        'air_conditioning_contractor': 'heating cooling HVAC', 'electrician': 'electrician electrical contractor',
+        'plumber': 'plumber plumbing', 'roofing_contractor': 'roofing contractor',
+        'general_contractor': 'general contractor', 'painter': 'painting contractor',
+        'locksmith': 'locksmith', 'moving_company': 'moving company',
+        'car_repair': 'auto repair mechanic', 'dentist': 'dentist dental',
+        'lawyer': 'lawyer attorney', 'restaurant': 'restaurant',
+        'hair_care': 'hair salon barber', 'beauty_salon': 'beauty salon spa',
+        'veterinary_care': 'veterinarian vet',
+      };
+      const primaryUsefulType = usefulTypes[0] || null;
+      const businessType = TYPE_TO_QUERY[primaryUsefulType] || (primaryUsefulType ? primaryUsefulType.replace(/_/g, ' ') : businessName.split(/\s+/).slice(0, 2).join(' '));
+      console.log(`[COMPETITOR-PICKER] Subject: ${subject?.name || businessName} | Types: ${rawTypes.join(', ')} | Search keyword: "${businessType}"`);
 
       // Step 3: Text Search — search exactly like a customer would
-      const allResults = new Map(); // placeId → result (dedup)
+      const allResults = new Map();
       const queries = [
         `${businessType} ${city} ${state || ''}`,
-        `${businessType} near ${city} ${state || ''}`,
+        `${businessType} near ${city}`,
       ];
 
       for (const query of queries) {

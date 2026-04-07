@@ -287,11 +287,25 @@ async function checkCompetitors(businessName, city, state, googleData) {
   try {
     const GENERIC = ['establishment', 'point_of_interest', 'local_business', 'store', 'premise'];
     const primaryType = (googleData?.types || []).find(t => !GENERIC.includes(t));
-    const keyword = primaryType ? primaryType.replace(/_/g, ' ') : 'business';
+    const TYPE_TO_QUERY = {
+      'hvac_contractor': 'heating cooling HVAC', 'heating_contractor': 'heating cooling HVAC',
+      'air_conditioning_contractor': 'heating cooling HVAC', 'electrician': 'electrician electrical contractor',
+      'plumber': 'plumber plumbing', 'roofing_contractor': 'roofing contractor',
+      'general_contractor': 'general contractor', 'painter': 'painting contractor',
+      'locksmith': 'locksmith', 'moving_company': 'moving company',
+      'car_repair': 'auto repair mechanic', 'car_dealer': 'car dealership',
+      'dentist': 'dentist dental', 'doctor': 'doctor medical',
+      'lawyer': 'lawyer attorney', 'real_estate_agency': 'real estate agent',
+      'restaurant': 'restaurant', 'hair_care': 'hair salon barber',
+      'beauty_salon': 'beauty salon spa', 'gym': 'gym fitness',
+      'veterinary_care': 'veterinarian vet', 'accounting': 'accountant CPA',
+    };
+    const keyword = TYPE_TO_QUERY[primaryType] || (primaryType ? primaryType.replace(/_/g, ' ') : 'contractor');
     const bizPlaceId = googleData?.placeId || null;
+    console.log(`[SCAN] Competitor search keyword: "${keyword}" (from type: ${primaryType || 'none'})`);
 
     let results = [];
-    for (const query of [`${keyword} ${city} ${state}`, `${keyword} near ${city} ${state}`]) {
+    for (const query of [`${keyword} ${city} ${state}`, `${keyword} near ${city}`]) {
       try {
         const r = await ax.get('https://maps.googleapis.com/maps/api/place/textsearch/json', { params: { query, key }, timeout: 8000 });
         const filtered = (r.data?.results || []).filter(p => p.place_id !== bizPlaceId);
